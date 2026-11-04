@@ -1,0 +1,30 @@
+# READ-ONLY EXAMPLE. Auxiliary door contact only. NOT a lock controller.
+# Adjust GPIO and electrical isolation to your hardware. Never connect a lock directly.
+esphome:
+  name: openretail-contact
+  friendly_name: OpenRetail Door Contact
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+logger:
+api:
+  encryption:
+    key: !secret api_encryption_key
+ota:
+  - platform: esphome
+binary_sensor:
+  - platform: gpio
+    name: Door Contact Auxiliary
+    pin:
+      number: GPIO18
+      mode:
+        input: true
+        pullup: true
+    device_class: door
+    filters:
+      - delayed_on: 50ms
+      - delayed_off: 50ms

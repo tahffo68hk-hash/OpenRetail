@@ -1,0 +1,11 @@
+# EXAMPLE ONLY. Replace store.example.com with a public DNS name under your control.
+# Do not publish this until merchant, penetration testing, ingress access controls,
+# backup and customer privacy review are complete.
+store.example.com {
+    encode zstd gzip
+    @admin path /api/admin/*
+    respond @admin "Admin API is VPN-only" 403
+    reverse_proxy openretail:8000
+}
+# Run the operator UI on a SEPARATE VPN-only TLS hostname / ingress with access
+# to the same service. Never expose Home Assistant, MQTT, NVR, RTSP to the public.

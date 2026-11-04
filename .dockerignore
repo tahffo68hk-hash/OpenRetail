@@ -1,0 +1,16 @@
+.git
+.venv
+.env
+.env.*
+!.env.example
+.pytest_cache
+__pycache__
+*.pyc
+*.sqlite3*
+*.db
+backups
+preview-*.png
+docs
+integrations
+workers
+tests

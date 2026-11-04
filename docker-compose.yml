@@ -1,0 +1,26 @@
+services:
+  openretail:
+    build: .
+    restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 150
+    env_file: .env
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - openretail_data:/srv/openretail/data
+      - openretail_backups:/srv/openretail/backups
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health',timeout=3)"]
+      interval: 20s
+      timeout: 4s
+      retries: 3
+      start_period: 10s
+volumes:
+  openretail_data:
+  openretail_backups:
