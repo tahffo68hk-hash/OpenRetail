@@ -11,7 +11,7 @@ def flag(name:str,default:bool=False)->bool:
 @dataclass(frozen=True)
 class Settings:
     db_path:str=os.getenv('DB_PATH','./data/openretail.sqlite3')
-    app_mode:str=os.getenv('APP_MODE','demo')  # demo | pilot
+    app_mode:str=os.getenv('APP_MODE','demo')  # demo | staging | production; pilot is a staging alias
     admin_key:str=os.getenv('ADMIN_KEY','')
     admin_password_hash:str=os.getenv('ADMIN_PASSWORD_HASH','')
     integration_key:str=os.getenv('INTEGRATION_KEY','')
@@ -41,7 +41,11 @@ class Settings:
     approved_store:bool=flag('STORE_SITE_APPROVED')  # not self-certifying on-site acceptance
 
     @property
-    def demo(self)->bool:return self.app_mode=='demo'
+    def profile(self)->str:
+        return {'demo':'demo','staging':'staging','pilot':'staging','production':'production'}.get(self.app_mode,'invalid')
+
+    @property
+    def demo(self)->bool:return self.profile=='demo'
 
     def validate(self):
         if not (self.admin_key and self.integration_key and self.app_secret):
@@ -50,19 +54,19 @@ class Settings:
             raise RuntimeError('ADMIN_KEY / INTEGRATION_KEY / APP_SECRET must be >=24 chars')
         if any(s.startswith('REPLACE_WITH_') for s in (self.admin_key,self.integration_key,self.app_secret)):
             raise RuntimeError('Example placeholder secrets prohibited')
-        if self.app_mode not in ('demo','pilot'):
-            raise RuntimeError('APP_MODE must be demo or pilot')
+        if self.profile=='invalid':
+            raise RuntimeError('APP_MODE must be demo, staging, or production')
         if self.mock_payments and not self.demo:
             raise RuntimeError('Mock payments are allowed in demo mode only')
         if self.live_door_enabled:
             raise RuntimeError('LIVE_DOOR_ENABLED remains prohibited until on-site hardware and egress gate')
-        if self.app_mode=='pilot':
+        if self.profile in ('staging','production'):
             if not self.public_base_url.startswith('https://'):
-                raise RuntimeError('Pilot requires PUBLIC_BASE_URL (https://...)')
+                raise RuntimeError('Staging and production require PUBLIC_BASE_URL (https://...)')
             if not self.admin_password_hash:
-                raise RuntimeError('Pilot requires ADMIN_PASSWORD_HASH; create via scripts/set_admin_password.py')
+                raise RuntimeError('Staging and production require ADMIN_PASSWORD_HASH; create via scripts/set_admin_password.py')
             if not self.trusted_proxy_tls:
-                raise RuntimeError('Pilot requires TLS reverse-proxy configuration')
+                raise RuntimeError('Staging and production require TLS reverse-proxy configuration')
         if self.payment_provider not in ('disabled','wechat_native'):
             raise RuntimeError('Unsupported PAYMENT_PROVIDER')
         if self.payment_provider!='disabled':

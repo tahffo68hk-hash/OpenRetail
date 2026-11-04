@@ -18,53 +18,94 @@
 - **进销存桥接**：OSPOS 风格 CSV 首次导入；产生订单后拒绝覆盖库存；ERPNext 的 `Item` 只读 REST 预览。禁止把 OSPOS、ERPNext 和 OpenRetail 三套库存同时视为权威。
 - **自托管**：SQLite WAL 单实例、自动数据结构升级、离线测试、Docker Compose 单实例/非 root/loopback、SQLite 在线备份工具、健康检查、部署检查脚本。
 
-## 2. 立即运行（演示模式）
+## 2. 配置档
 
-前提 Python 3.11+。
+`APP_MODE` 只有三档。`pilot` 仍可作为 `staging` 的旧别名。
 
-```bash
-cd OpenRetail_V2
+| 档 | 用途 | 模拟支付 | 实体开锁 |
+|---|---|---|---|
+| `demo` | 本机演示 | 允许，状态是 `MOCK_NOT_REAL_MONEY` | 启动时拒绝 |
+| `staging` | 有人值守预发 | 拒绝，不能当成真实交易 | 启动时拒绝 |
+| `production` | 正式环境 | 拒绝 | 启动时拒绝，Compose 也强制 `LIVE_DOOR_ENABLED=false` |
+
+示例：`.env.demo.example`、`.env.staging.example`、`.env.production.example`。真实密钥只放在未提交的 `.env`。
+
+## 3. Windows 本地启动、停止、备份和恢复
+
+前提 Python 3.11+。在 `OpenRetail_V2` 目录执行：
+
+```powershell
 python -m venv .venv
-# Windows: .venv\Scripts\activate
-# Linux/macOS: source .venv/bin/activate
-python -m pip install -r requirements-dev.txt
-python scripts/init_env.py  # 生成不会提交的 .env 密钥
-uvicorn openretail.main:app --host 127.0.0.1 --port 8000
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+.\.venv\Scripts\python.exe scripts\init_env.py
+.\.venv\Scripts\python.exe scripts\doctor.py --init-demo
+.\.venv\Scripts\python.exe -m uvicorn openretail.main:app --host 127.0.0.1 --port 8000
 ```
 
-打开 http://127.0.0.1:8000 ，生成访客会话，添加商品 → 创建订单 → 模拟支付。后台可使用 `.env` 中的 `ADMIN_KEY` **仅用于演示登录**，不会在浏览器存储密钥。正式模式请通过下面的命令创建管理员密码。
+`--init-demo` 只会在演示档、且业务库还不存在时建库。预发、正式，以及已有业务库，都不会被这个命令创建或覆盖。日常检查不要带这个参数：
 
-```bash
-python scripts/set_admin_password.py  # 交互输入强密码；仅写入 PBKDF2 哈希
-python -m pytest -q
-python scripts/doctor.py
-python scripts/backup.py
+```powershell
+.\.venv\Scripts\python.exe scripts\doctor.py
 ```
 
-**Docker（默认演示、仅监听本机）**：
+浏览器打开 http://127.0.0.1:8000 。演示流程是生成访客会话、加商品、创建订单、模拟支付。后台演示登录使用 `.env` 里的 `ADMIN_KEY`，密钥不会写进页面。预发和正式改用管理员密码：
 
-```bash
-python scripts/init_env.py
-# Docker Engine / Docker Desktop 可用后：
+```powershell
+.\.venv\Scripts\python.exe scripts\set_admin_password.py
+```
+
+停止服务：在运行 uvicorn 的窗口按 Ctrl+C。如果窗口已经关掉，只结束监听 8000 端口的那个进程：
+
+```powershell
+$procId = (Get-NetTCPConnection -LocalPort 8000 -State Listen).OwningProcess
+Stop-Process -Id $procId
+```
+
+备份使用 SQLite 在线备份，不直接拷贝 WAL 半成品：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\backup.py
+```
+
+恢复必须写到另一个文件，脚本拒绝覆盖 `DB_PATH` 指向的活动库：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\restore.py --backup .\backups\openretail-时间戳.sqlite3 --dest .\restore-drill\restored.sqlite3
+```
+
+确认恢复文件的完整性输出为 PASS 后，再由人工决定是否在停机窗口替换活动库。本命令本身不会做这一步。
+
+回归：
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -q
+```
+
+## 4. Docker
+
+默认只把端口发布到本机 `127.0.0.1:8000`，容器内单 worker，数据在命名卷里。没有 Docker Engine 时不要把配置检查当成启动成功。
+
+```powershell
+docker compose config
 docker compose up --build -d
 docker compose ps
-# 单次备份写入容器的 openretail_backups volume：
 docker compose exec openretail python scripts/backup.py
+docker compose down
 ```
 
-部署镜像以单 worker 运行，采用 SQLite 单机事务，不能用 NFS 存储或直接横向扩容多个服务实例。完整数据库的异地备份与实际恢复演练仍需运维配置。
+镜像以 SQLite 单机事务运行，不能把数据卷放到 NFS，也不能起多个写入副本。
 
-## 3. 有人值守试点（仅在配置完成后）
+## 5. 有人值守试点（仅在配置完成后）
 
-1. 单独备份原数据；创建管理员密码，设置 `APP_MODE=pilot`、`MOCK_PAYMENTS_ENABLED=false`、`TRUSTED_PROXY_TLS=true`、`PUBLIC_BASE_URL=https://你的已配置域名`。必须实际配置 HTTPS 反向代理，不能只把环境变量设为 true。
+1. 单独备份原数据；创建管理员密码，设置 `APP_MODE=staging` 或 `production`、`MOCK_PAYMENTS_ENABLED=false`、`TRUSTED_PROXY_TLS=true`、`PUBLIC_BASE_URL=https://你的已配置域名`。必须实际配置 HTTPS 反向代理，不能只把环境变量设为 true。`production` 同样拒绝模拟支付和实体开锁。
 2. 为真实收款向微信支付申请商户资质/Native 支付权限，设置 `PAYMENT_PROVIDER=wechat_native` 与 `.env.example` 中要求的商户号、证书私钥、平台公钥、APIv3 密钥及回调地址。**绝不把私钥、证书或 `.env` 提交给 Agent 仓库或 Git**。
 3. 完成官方支付测试（订单号/金额/重复回调/掉线/查单/关单/超时/退款和日终对账）。其中**退款尚未编码**，需要实现或落实独立人工退款操作规程后才能收真实款项。
 4. 打开管理端，创建商品与库存，员工签发120秒一次性结账二维码，顾客扫码获取自助购物会话；在**另一台屏幕/设备**展示微信 Native 收款 QR 供顾客扫码。微信内 H5/JSAPI 同机支付当前未实现。
 5. 所有已发起支付但未回调的订单，操作员可使用 `POST /api/admin/orders/{order_id}/reconcile-wechat` 查单；仅在**微信确认 CLOSED** 后释放预留。支付成功以官方回调或商户查单验签结果为准。
 
-`pilot` 模式下无法匿名生成访客会话、无法切换到无人值守经营、无法控制实际电锁，这是故意设置的安全边界，而不是配置错误。
+`staging` 和 `production` 无法匿名生成访客会话、无法切换到无人值守经营、无法控制实际电锁。这是故意设置的安全边界。`pilot` 是 `staging` 的旧别名。
 
-## 4. 对上游项目的真实依赖与限制
+## 6. 对上游项目的真实依赖与限制
 
 | 项目 | 本仓库实现 | 需要额外部署/开发 |
 |---|---|---|
@@ -76,7 +117,7 @@ docker compose exec openretail python scripts/backup.py
 
 OSPOS 的特殊 LICENSE 署名条件、ERPNext 的 GPLv3 和其他上游许可证应在二次分发时分别核查；本仓库未拷贝它们的源码。
 
-## 5. 安全边界和交付验收
+## 7. 安全边界和交付验收
 
 - **默认不发送真实收费请求**，不提供商户密钥，不连接实体门锁。
 - **不能用付款作为离店先决条件**；现场电锁必须有独立应急逃生和符合所在地消防/建筑规范的供电失效策略。
@@ -86,7 +127,7 @@ OSPOS 的特殊 LICENSE 署名条件、ERPNext 的 GPLv3 和其他上游许可�
 
 详细路径：`docs/ARCHITECTURE.md`、`docs/PRODUCTION_GATE.md`、`docs/AGENT_HANDOFF.md`。
 
-## 6. 浏览器隔离交互验证（可选）
+## 8. 浏览器隔离交互验证（可选）
 
 ```bash
 pip install -r requirements-ui.txt

@@ -70,7 +70,7 @@ def create_app(settings:Settings|None=None)->FastAPI:
     db.init(demo=cfg.demo)
     ha=HomeAssistantAdapter(cfg)
     wechat=WeChatNative(cfg)
-    app=FastAPI(title='OpenRetail 无人零售自建系统',version='2.0.0',
+    app=FastAPI(title='OpenRetail 无人零售自建系统',version='2.1.0',
                 description='Production-oriented staged implementation. Door unlock prohibited.',
                 docs_url='/docs' if cfg.demo else None,redoc_url=None,openapi_url='/openapi.json' if cfg.demo else None)
     app.state.db=db
@@ -179,20 +179,25 @@ def create_app(settings:Settings|None=None)->FastAPI:
         db.audit(c,'payment','ORDER_PAID',order_id)
         return 'PAID'
 
+    def database_ready():
+        try:
+            with db.connect() as c:
+                ok=c.execute('PRAGMA quick_check').fetchone()[0]=='ok'
+        except (sqlite3.OperationalError,RuntimeError):
+            abort(503,'数据库不可用')
+        if not ok:abort(503,'数据库完整性检查失败')
+
     @app.get('/api/health')
     def health():
-        with db.connect() as c:
-            c.execute('SELECT 1').fetchone()
-        return {'status':'ok','mode':cfg.app_mode,
+        database_ready()
+        return {'status':'ok','mode':cfg.app_mode,'profile':cfg.profile,
                 'real_payment':cfg.payment_provider!='disabled',
                 'real_door':False,'unattended_ready':False}
 
     @app.get('/api/readiness')
     def readiness():
-        with db.connect() as c:
-            ok=c.execute('PRAGMA quick_check').fetchone()[0]=='ok'
-        if not ok:abort(503,'数据库完整性检查失败')
-        return {'status':'ready','db':True,'staffed_checkout_ready':False,
+        database_ready()
+        return {'status':'ready','db':True,'profile':cfg.profile,'staffed_checkout_ready':False,
                 'unattended_approved':False}
 
     @app.get('/api/public/store')
