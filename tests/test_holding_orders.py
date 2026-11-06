@@ -69,3 +69,37 @@ def test_staff_can_release_an_unpaid_hold_without_touching_on_hand(client, admin
     assert blocked.status_code==409
     assert levels(client,made['id'])[:2]==(4,1)
     assert client.get('/api/admin/overview',headers=admin_header).json()['verified_revenue_cents']==0
+
+
+def test_holding_count_follows_the_same_unpaid_orders(client, admin_header):
+    assert client.get('/api/admin/orders/holding').status_code==401
+    assert client.get('/api/admin/overview').status_code==401
+    guest=visitor(client)
+    product=client.get('/api/products').json()[0]
+    created=client.post('/api/orders',headers=guest,json={'request_id':'holding-count-0001',
+        'lines':[{'product_id':product['id'],'quantity':1}]}).json()
+    with client.app.state.db.connect() as conn:
+        stock=conn.execute('SELECT stock,reserved_stock FROM products WHERE id=?',(product['id'],)).fetchone()
+        moves=conn.execute('SELECT COUNT(*) n FROM stock_movements').fetchone()['n']
+    listed=client.get('/api/admin/orders/holding',headers=admin_header).json()
+    ids={row['id'] for row in listed['orders']}
+    assert created['id'] in ids and len(listed['orders'])>=1
+    assert client.get('/api/admin/inventory-ledger',headers=admin_header).json()['balanced'] is True
+    with client.app.state.db.connect() as conn:
+        now=conn.execute('SELECT stock,reserved_stock FROM products WHERE id=?',(product['id'],)).fetchone()
+        assert now['stock']==stock['stock'] and now['reserved_stock']==stock['reserved_stock']
+        assert conn.execute('SELECT COUNT(*) n FROM stock_movements').fetchone()['n']==moves
+    paid=client.post('/api/payments/mock-confirm',headers=guest,json={'order_id':created['id']})
+    assert paid.status_code==200 and paid.json()['real_money'] is False and paid.json()['payment_kind']=='MOCK_NOT_REAL_MONEY'
+    after_pay={row['id'] for row in client.get('/api/admin/orders/holding',headers=admin_header).json()['orders']}
+    assert created['id'] not in after_pay
+    other=client.post('/api/orders',headers=guest,json={'request_id':'holding-count-0002',
+        'lines':[{'product_id':product['id'],'quantity':1}]}).json()
+    assert other['id'] in {row['id'] for row in client.get('/api/admin/orders/holding',headers=admin_header).json()['orders']}
+    cancelled=client.post('/api/orders/'+other['id']+'/cancel',headers=guest)
+    assert cancelled.status_code==200
+    assert other['id'] not in {row['id'] for row in client.get('/api/admin/orders/holding',headers=admin_header).json()['orders']}
+    page=__import__('pathlib').Path('web/index.html').read_text(encoding='utf-8')
+    script=__import__('pathlib').Path('web/app.js').read_text(encoding='utf-8')
+    assert 'id="jump-holding"' in page and '查看未付款占用' in page
+    assert '没有占用库存的未付款订单' in script
