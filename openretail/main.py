@@ -258,6 +258,8 @@ def create_app(settings:Settings|None=None)->FastAPI:
     app.state.edit_inflight=set()
     app.state.listing_guard=threading.Lock()
     app.state.listing_inflight=set()
+    app.state.help_status_guard=threading.Lock()
+    app.state.help_status_inflight=set()
 
     @app.middleware('http')
     async def security_headers(request:Request,call_next):
@@ -1513,17 +1515,34 @@ def create_app(settings:Settings|None=None)->FastAPI:
         """Mark a help request seen or done. Never opens a door or collects payment."""
         if payload.status not in ('ACKNOWLEDGED','RESOLVED'):
             abort(422,'状态只能是 ACKNOWLEDGED 或 RESOLVED')
-        with db.tx() as c:
-            row=c.execute('SELECT id,status FROM help_requests WHERE id=?',(request_id,)).fetchone()
-            if not row:abort(404,'求助不存在')
-            if row['status']=='RESOLVED' and payload.status!='RESOLVED':
-                abort(409,'已处理的求助不能改回未处理')
-            outcome='IDEMPOTENT' if row['status']==payload.status else payload.status
-            if outcome!='IDEMPOTENT':
-                c.execute('UPDATE help_requests SET status=? WHERE id=?',(payload.status,request_id))
-                db.audit(c,actor,'HELP_'+payload.status,str(request_id))
-        return {'id':request_id,'status':payload.status,'outcome':outcome,
-                'physical_door_opened':False,'door_authorized':False,'payment_required_to_leave':False}
+        with app.state.help_status_guard:
+            if request_id in app.state.help_status_inflight:
+                with db.connect() as c:
+                    row=c.execute('SELECT status FROM help_requests WHERE id=?',(request_id,)).fetchone()
+                if not row:abort(404,'求助不存在')
+                return {'id':request_id,'status':row['status'],'outcome':'IDEMPOTENT','duplicate':True,'applied':False,
+                        'physical_door_opened':False,'door_authorized':False,'identity_verified':False,
+                        'payment_required_to_leave':False}
+            app.state.help_status_inflight.add(request_id)
+        try:
+            hold=getattr(app.state,'hold_help_status',None)
+            if hold:hold()
+            with db.tx() as c:
+                row=c.execute('SELECT id,status FROM help_requests WHERE id=?',(request_id,)).fetchone()
+                if not row:abort(404,'求助不存在')
+                if row['status']=='RESOLVED' and payload.status!='RESOLVED':
+                    abort(409,'已处理的求助不能改回未处理')
+                outcome='IDEMPOTENT' if row['status']==payload.status else payload.status
+                if outcome!='IDEMPOTENT':
+                    c.execute('UPDATE help_requests SET status=? WHERE id=?',(payload.status,request_id))
+                    db.audit(c,actor,'HELP_'+payload.status,str(request_id))
+            return {'id':request_id,'status':payload.status if outcome!='IDEMPOTENT' else row['status'],
+                    'outcome':outcome,'duplicate':False,'applied':outcome!='IDEMPOTENT',
+                    'physical_door_opened':False,'door_authorized':False,'identity_verified':False,
+                    'payment_required_to_leave':False}
+        finally:
+            with app.state.help_status_guard:
+                app.state.help_status_inflight.discard(request_id)
 
     @app.get('/api/admin/stock-movements',dependencies=[Depends(admin)])
     def stock_movements(limit:int=Query(default=100,ge=1,le=500)):

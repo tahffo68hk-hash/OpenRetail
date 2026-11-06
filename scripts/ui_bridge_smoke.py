@@ -113,8 +113,16 @@ with TestClient(create_app(cfg)) as backend,sync_playwright() as pw:
  with backend.app.state.db.connect() as conn:
   assert conn.execute('SELECT COUNT(*) n FROM checkout_invites').fetchone()['n']==1
   assert conn.execute("SELECT COUNT(*) n FROM audit_events WHERE action='INVITE_CREATED'").fetchone()['n']==1
- p.locator('[data-help-status="ACKNOWLEDGED"]').click()
- p.wait_for_function("document.querySelector('#help-list').textContent.includes('已确认')")
+ p.evaluate("() => { const b=document.querySelector('[data-help-status=\"ACKNOWLEDGED\"]'); b.click(); b.click(); }")
+ p.wait_for_function("document.querySelector('#help-list').textContent.includes('已确认') && document.querySelector('#toast').textContent.includes('已确认求助，门未打开')")
+ with backend.app.state.db.connect() as conn:
+  assert conn.execute("SELECT COUNT(*) n FROM audit_events WHERE action='HELP_ACKNOWLEDGED'").fetchone()['n']==1
+  assert conn.execute("SELECT COUNT(*) n FROM audit_events WHERE action='HELP_RESOLVED'").fetchone()['n']==0
+ p.locator('[data-help-status="RESOLVED"]').click()
+ p.wait_for_function("document.querySelector('#toast').textContent.includes('求助已处理，门未打开')")
+ with backend.app.state.db.connect() as conn:
+  assert conn.execute("SELECT COUNT(*) n FROM audit_events WHERE action='HELP_ACKNOWLEDGED'").fetchone()['n']==1
+  assert conn.execute("SELECT COUNT(*) n FROM audit_events WHERE action='HELP_RESOLVED'").fetchone()['n']==1
  p.wait_for_function("document.querySelector('#ledger-balance').textContent.includes('一致')")
  p.wait_for_function("document.querySelector('#m-sales').textContent.includes('¥')")
  assert p.locator('#m-real').inner_text()=='¥0.00'
