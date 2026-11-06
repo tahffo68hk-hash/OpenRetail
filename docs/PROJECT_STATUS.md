@@ -4,6 +4,18 @@
 
 完全无人值守经营仍是 **NOT_APPROVED**。示例配置里的真实支付和实体开锁都是关闭的。
 
+## 本增量（未付款预留何时结束）
+
+已在代码和测试里做到，并在本机复跑：
+
+- 未付款订单本来就在创建后 900 秒到期。顾客页和占用库存列表现在显示门店时区的到期时间（默认 Asia/Shanghai）以及剩余秒数。只是读出这个时间，不因此改库存。
+- 到期后仍按原来的规则：`PENDING` 和 `mock:` 的 `PAYMENT_PENDING` 会释放预留，状态变为已超时未付款。微信或其他非 `mock:` 的 `PAYMENT_PENDING` 到点也不会被这个计时释放。
+- 店员关闭占用仍走原来的 `mock-close`。未登录看占用列表返回 401。
+
+`/tmp/openretail-venv/bin/python -m pytest -q`（工作目录 `/workspace`，Python 3.12.3）：**66 passed，1 warning，6.80s，退出码 0**。警告仍是 Starlette 的 `httpx` TestClient 弃用提示。66 = 上一轮 65 + 本增量 1。
+
+`scripts/ui_bridge_smoke.py` 在去掉密钥环境变量后退出码 0。未付款的 ¥2.00 订单在加减数量和付款之前显示「预留至 2026-11-06 13:39 Asia/Shanghai」。随后模拟支付仍是「模拟支付成功 · 非真实资金 · 已扣库存 · ¥2.00」。390 宽 `scrollWidth` 390，1440 宽 `scrollWidth` 1440，`pageerror` 为空。这仍是 Chrome 到 TestClient 的桥，不是真机，也不是真实收款。
+
 ## 本增量（扫码和加数量的失败提示）
 
 已在代码和测试里做到，并在本机复跑：

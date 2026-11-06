@@ -273,7 +273,13 @@ def create_app(settings:Settings|None=None)->FastAPI:
             'SELECT product_id,barcode,name,unit_price_cents,quantity FROM order_lines WHERE order_id=?',
             (order_id,))]
         items='、'.join(f"{line['name']} x{line['quantity']}" for line in lines)
-        return {**asdict(row),'lines':lines,'items':items,**payment_facts(c,order_id,row['status'])}
+        zone_name,zone=store_zone(c)
+        expires_at=row['expires_at']
+        expiry={}
+        if expires_at is not None:
+            expiry={'expires_local':format_local(expires_at,zone),'expires_timezone':zone_name,
+                    'expires_in_seconds':int(expires_at)-now()}
+        return {**asdict(row),'lines':lines,'items':items,**payment_facts(c,order_id,row['status']),**expiry}
 
     def record_virtual_door(c,session_id,result,detail):
         c.execute('''INSERT INTO door_events(session_id,result,provider,detail,created_at)
@@ -1154,7 +1160,7 @@ def create_app(settings:Settings|None=None)->FastAPI:
         """Unpaid orders that still reserve stock. Read-only; closing is a separate action."""
         with db.connect() as c:
             zone_name,zone=store_zone(c)
-            rows=c.execute('''SELECT o.id,o.status,o.total_cents,o.created_at,o.paid_at,o.payment_reference,
+            rows=c.execute('''SELECT o.id,o.status,o.total_cents,o.created_at,o.paid_at,o.expires_at,o.payment_reference,
                 (SELECT provider FROM payments WHERE order_id=o.id ORDER BY created_at DESC LIMIT 1) provider,
                 (SELECT verified FROM payments WHERE order_id=o.id ORDER BY created_at DESC LIMIT 1) verified,
                 (SELECT group_concat(name || ' x' || quantity, '、') FROM order_lines WHERE order_id=o.id) items
@@ -1168,6 +1174,10 @@ def create_app(settings:Settings|None=None)->FastAPI:
                 item['real_money']=False
                 item['unpaid']=True
                 item['closable']=closable
+                item['expires_at']=row['expires_at']
+                item['expires_local']=format_local(row['expires_at'],zone) if row['expires_at'] is not None else ''
+                item['expires_timezone']=zone_name
+                item['expires_in_seconds']=int(row['expires_at'])-now() if row['expires_at'] is not None else None
                 item['note']='未付款 · 非真实资金' if closable else '外部支付占用，不能在这里释放'
                 listed.append(item)
         return {'timezone':zone_name,'orders':listed,'physical_door_opened':False,

@@ -47,7 +47,7 @@ with TestClient(create_app(cfg)) as backend,sync_playwright() as pw:
  assert p.locator('#cart-total').inner_text()=='¥0.00'
  p.locator('.add-btn').first.click()
  p.locator('#checkout-btn').click()
- p.wait_for_function("document.querySelector('#payment-result').textContent.includes('订单')")
+ p.wait_for_function("document.querySelector('#payment-result').textContent.includes('订单') && document.querySelector('#payment-result').textContent.includes('预留至') && document.querySelector('#payment-result').textContent.includes('Asia/Shanghai') && document.querySelector('#payment-result').textContent.includes('¥2.00')")
  print('order:',p.locator('#payment-result').inner_text())
  p.wait_for_function("document.querySelector('#cart-total').textContent==='¥2.00'")
  p.locator('#cart [data-add]').click()
