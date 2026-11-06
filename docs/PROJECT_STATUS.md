@@ -4,6 +4,18 @@
 
 完全无人值守经营仍是 **NOT_APPROVED**。示例配置里的真实支付和实体开锁都是关闭的。
 
+## 本增量（按动作筛选操作记录）
+
+已在代码和测试里做到，并在本机复跑：
+
+- 管理页的操作记录可以按动作名称筛选，例如 `INVITE_CREATED` 和 `INVITE_REDEEMED`。留空仍是最近的全部记录。没有匹配时仍显示「没有操作记录」，不是错误页。
+- 筛选只读。不新增记录，不改账面或预留，不写流水，不关单，不开门，不调用支付机构。未登录仍是 401。没有修改或删除接口。
+- `INVITE_CREATED` 仍只记 `lifetime_seconds=120`。`INVITE_REDEEMED` 仍只记会话编号前缀和 identity_verified=false、door_authorized=false。都不记邀请码。演示「生成访客会话」不写 `INVITE_REDEEMED`。
+
+`/tmp/openretail-venv/bin/python -m pytest -q`（工作目录 `/workspace`，Python 3.12.3）：**76 passed，1 warning，8.04s，退出码 0**。警告仍是 Starlette 的 `httpx` TestClient 弃用提示。76 = 上一轮 75 + 本增量 1。
+
+`scripts/ui_bridge_smoke.py` 在去掉密钥环境变量后退出码 0。顾客没有领取邀请码，仍用「生成访客会话」完成 ¥2.00 模拟支付，并含「模拟支付成功 · 非真实资金 · 已扣库存」。下架之后按 `PRODUCT_UNLISTED` 筛选，列表含该动作和条码，不含 `INVITE_CREATED`，然后把筛选清空。没有关单。390 宽 `scrollWidth` 390，1440 宽 `scrollWidth` 1440，`pageerror` 为空。这仍是 Chrome 到 TestClient 的桥，不是真机，也不是真实收款。这条 PR 仍未合并。
+
 ## 本增量（今日摘要里的未付款占用）
 
 已在代码和测试里做到，并在本机复跑：

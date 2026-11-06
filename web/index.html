@@ -91,7 +91,7 @@
         </section>
         <section id="admin-audit" class="admin-section">
           <h2 class="admin-section-title">操作记录</h2>
-          <article class="surface"><div class="surface-heading"><div><h2>管理操作记录</h2><p>只追加，不能修改或删除。记录本身不改库存、不开门、不收款。</p></div></div><div id="audit-list" class="events"><p class="muted">没有操作记录</p></div></article>
+          <article class="surface"><div class="surface-heading"><div><h2>管理操作记录</h2><p>只追加，不能修改或删除。记录本身不改库存、不开门、不收款。可按动作名称筛选，留空则看最近记录。</p></div></div><form id="audit-filter" class="product-form"><label>动作<input id="audit-action" name="action" placeholder="例如 INVITE_CREATED" autocomplete="off"></label><button class="btn secondary" type="submit">筛选记录</button></form><div id="audit-list" class="events"><p class="muted">没有操作记录</p></div></article>
         </section>
         <section id="admin-door" class="admin-section">
           <h2 class="admin-section-title">门禁事件</h2>

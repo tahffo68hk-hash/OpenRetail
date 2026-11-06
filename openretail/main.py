@@ -1281,12 +1281,21 @@ def create_app(settings:Settings|None=None)->FastAPI:
         return {'system_of_record':'sqlite','balanced':balanced,'products':products,'movements':movements}
 
     @app.get('/api/admin/audit')
-    def admin_audit(limit:int=Query(default=40,ge=1,le=200), actor:str=Depends(admin)):
+    def admin_audit(limit:int=Query(default=40,ge=1,le=200), action:str=Query(default=''), actor:str=Depends(admin)):
         """Read-only privileged-action trail. Rows are not editable from this API."""
+        name=action.strip()
+        if name and (len(name)>64 or any(ch not in 'ABCDEFGHIJKLMNOPQRSTUVWXYZ_0123456789' for ch in name)):
+            abort(422,'动作名称不正确')
         with db.connect() as c:
-            rows=[asdict(x) for x in c.execute(
-                'SELECT id,actor,action,detail,created_at FROM audit_events ORDER BY id DESC LIMIT ?',(limit,))]
-        return {'append_only':True,'physical_door_opened':False,'payment_required_to_leave':False,'events':rows}
+            if name:
+                rows=[asdict(x) for x in c.execute(
+                    'SELECT id,actor,action,detail,created_at FROM audit_events WHERE action=? ORDER BY id DESC LIMIT ?',
+                    (name,limit))]
+            else:
+                rows=[asdict(x) for x in c.execute(
+                    'SELECT id,actor,action,detail,created_at FROM audit_events ORDER BY id DESC LIMIT ?',(limit,))]
+        return {'append_only':True,'action':name,'physical_door_opened':False,
+                'payment_required_to_leave':False,'events':rows}
 
     @app.get('/api/admin/events',dependencies=[Depends(admin)])
     def admin_events():
