@@ -380,10 +380,16 @@ def create_app(settings:Settings|None=None)->FastAPI:
             return [{**asdict(row),'available_stock':row['stock']-row['reserved_stock']}
                     for row in c.execute('SELECT * FROM products WHERE active=1 ORDER BY id')]
 
+    @app.get('/api/products/by-barcode/')
+    def product_by_barcode_blank():
+        abort(422,'请输入商品条码')
+
     @app.get('/api/products/by-barcode/{barcode}')
     def product_by_barcode(barcode:str):
+        code=barcode.strip()
+        if not code:abort(422,'请输入商品条码')
         with db.connect() as c:
-            row=c.execute('SELECT * FROM products WHERE barcode=?',(barcode,)).fetchone()
+            row=c.execute('SELECT * FROM products WHERE barcode=?',(code,)).fetchone()
         if not row:abort(404,'未找到条码')
         if not row['active']:abort(409,'该商品已下架，暂不销售')
         return {'id':row['id'],'barcode':row['barcode'],'name':row['name'],'price_cents':row['price_cents'],
