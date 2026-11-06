@@ -4,6 +4,19 @@
 
 完全无人值守经营仍是 **NOT_APPROVED**。示例配置里的真实支付和实体开锁都是关闭的。
 
+## 本增量（管理端流水、模拟退款、顾客求助、示例库路径）
+
+已在代码和测试里做到，并在本机复跑：
+
+- 管理页读取 `GET /api/admin/inventory-ledger`，显示账面、预留、流水合计和是否一致，并写明权威是本库 SQLite。
+- 管理页对 `MOCK_NOT_REAL_MONEY` 且 `verified` 不是 1 的已付订单提供「模拟退款」。顾客页没有这个按钮。桥接脚本点过后，订单资金列变为「模拟退回」。已验签金额显示 ¥0.00，模拟销售额单独显示。
+- 顾客可 `POST /api/help` 留下文字、时间和可选的会话/订单。员工在管理页能看到。响应里 `physical_door_opened=false`、`payment_required_to_leave=false`。求助不增加门禁事件。
+- `.env.demo.example`（以及 `init_env.py` 所复制的 `.env.example`）使用 `./data/demo/openretail.sqlite3`，预发和正式示例分别使用 `./data/staging/` 与 `./data/production/`。没有迁移或删除已有数据库文件。
+
+`/tmp/openretail-venv/bin/python -m pytest -q`（工作目录 `/workspace`，Python 3.12.3）：**46 passed，1 warning，4.36s，退出码 0**。警告仍是 Starlette 的 `httpx` TestClient 弃用提示。46 = 上一轮 44 + 本增量 2。
+
+`scripts/ui_bridge_smoke.py` 在去掉密钥环境变量后退出码 0：390 宽 `scrollWidth` 390；未付款与「模拟支付成功 · 非真实扣款」文案仍在；管理端已付订单数为 1、已验签金额为 ¥0.00；求助文案「请到货架帮忙」和「不会打开实体门」出现；流水核对含「一致」；模拟退款后订单表含「模拟退回」；`pageerror` 为空；1440 宽 `scrollWidth` 1440。这仍是 Chrome 到 TestClient 的桥，不是真机，也不是微信退款。
+
 ## 本增量（顾客界面、演示启动、虚拟门事件）
 
 已在代码和测试里做到，并在本机复跑：

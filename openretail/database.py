@@ -79,6 +79,13 @@ CREATE TABLE IF NOT EXISTS login_attempts(
 CREATE TABLE IF NOT EXISTS checkout_invites(
  invite_hash TEXT PRIMARY KEY,created_at INTEGER NOT NULL,expires_at INTEGER NOT NULL,consumed_at INTEGER
 );
+CREATE TABLE IF NOT EXISTS help_requests(
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ session_id TEXT,
+ order_id TEXT,
+ message TEXT NOT NULL,
+ created_at INTEGER NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_orders_status_exp ON orders(status,expires_at);
 CREATE INDEX IF NOT EXISTS idx_orders_session ON orders(session_id,created_at);
 CREATE INDEX IF NOT EXISTS idx_stock_movement_product ON stock_movements(product_id,id);

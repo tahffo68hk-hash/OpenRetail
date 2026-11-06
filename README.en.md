@@ -30,7 +30,7 @@ Designed for a 20–50 m² daily-goods shop. It integrates the boundaries of **O
 | `staging` | Staffed pre-production | Rejected; it is not a real sale | Rejected at startup |
 | `production` | Production | Rejected | Rejected at startup; Compose also forces `LIVE_DOOR_ENABLED=false` |
 
-Examples: `.env.demo.example`, `.env.staging.example`, `.env.production.example`. Real secrets belong only in an uncommitted `.env`.
+Examples: `.env.demo.example`, `.env.staging.example`, `.env.production.example`. Their sample `DB_PATH` values point at `./data/demo/`, `./data/staging/`, and `./data/production/` so a copied demo file does not select another profile's database. Real secrets belong only in an uncommitted `.env`.
 
 ## 3. Windows start, stop, backup, and restore
 

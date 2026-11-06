@@ -87,6 +87,32 @@ def test_guest_order_history_separates_mock_unpaid_and_timeout(client):
     assert client.post('/api/orders/'+paid.json()['id']+'/refund',headers=first).status_code==404
 
 
+def test_help_request_does_not_open_a_door_or_require_payment(client,admin_header):
+    anonymous=client.post('/api/help',json={'message':'货架需要帮忙'})
+    assert anonymous.status_code==201
+    body=anonymous.json()
+    assert body['physical_door_opened'] is False and body['payment_required_to_leave'] is False
+    assert body['door_authorized'] is False and body['session_recorded'] is False
+    guest=visitor(client)
+    other=visitor(client)
+    product=client.get('/api/products').json()[0]
+    order=client.post('/api/orders',headers=guest,json={'request_id':'help-order-context-01',
+        'lines':[{'product_id':product['id'],'quantity':1}]}).json()
+    before=client.get('/api/admin/events',headers=admin_header).json()['door']
+    stolen=client.post('/api/help',headers=other,json={'message':'想看别人的订单','order_id':order['id']})
+    assert stolen.status_code==404
+    linked=client.post('/api/help',headers=guest,json={'message':'这单扫码失败','order_id':order['id']})
+    assert linked.status_code==201 and linked.json()['order_id']==order['id']
+    assert linked.json()['physical_door_opened'] is False
+    listed=client.get('/api/admin/help-requests',headers=admin_header).json()
+    assert listed['physical_door_opened'] is False and listed['payment_required_to_leave'] is False
+    messages={row['message'] for row in listed['requests']}
+    assert {'货架需要帮忙','这单扫码失败'}<=messages
+    after=client.get('/api/admin/events',headers=admin_header).json()['door']
+    assert after==before
+    assert client.get('/api/admin/help-requests').status_code==401
+
+
 def test_virtual_entry_events_keep_the_physical_door_closed(client,admin_header):
     auth=visitor(client)
     status=client.get('/api/entry/status',headers=auth).json()

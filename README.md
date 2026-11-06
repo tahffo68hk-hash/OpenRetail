@@ -30,7 +30,7 @@
 | `staging` | 有人值守预发 | 拒绝，不能当成真实交易 | 启动时拒绝 |
 | `production` | 正式环境 | 拒绝 | 启动时拒绝，Compose 也强制 `LIVE_DOOR_ENABLED=false` |
 
-示例：`.env.demo.example`、`.env.staging.example`、`.env.production.example`。真实密钥只放在未提交的 `.env`。
+示例：`.env.demo.example`、`.env.staging.example`、`.env.production.example`。三份示例的 `DB_PATH` 分别是 `./data/demo/`、`./data/staging/`、`./data/production/`，避免把演示配置指到另一档的库。真实密钥只放在未提交的 `.env`。
 
 ## 3. Windows 本地启动、停止、备份和恢复
 

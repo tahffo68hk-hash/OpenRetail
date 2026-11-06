@@ -66,6 +66,9 @@ class FrigateMessage(BaseModel):
 class StockChange(BaseModel):
     quantity_delta:int=Field(ge=-100_000,le=100_000)
     reason:str=Field(min_length=4,max_length=120)
+class HelpInput(BaseModel):
+    message:str=Field(min_length=2,max_length=400)
+    order_id:str|None=Field(default=None,max_length=64)
 
 
 def create_app(settings:Settings|None=None)->FastAPI:
@@ -317,6 +320,36 @@ def create_app(settings:Settings|None=None)->FastAPI:
     def read_entry_status(sid:str=Depends(guest)):
         with db.connect() as c:
             return entry_status(c,sid)
+
+    def optional_guest(authorization:str|None):
+        if not authorization:return None
+        if not authorization.startswith('Bearer '):abort(401,'访客会话无效')
+        with db.connect() as c:
+            row=c.execute('SELECT id,expires_at FROM guest_sessions WHERE token_hash=?',
+                          (digest(authorization[7:]),)).fetchone()
+        if not row or row['expires_at']<=now():abort(401,'访客会话已失效')
+        return row['id']
+
+    @app.post('/api/help',status_code=201)
+    def ask_for_staff(payload:HelpInput,authorization:str|None=Header(default=None)):
+        """In-store help request. Does not open a door and does not require payment."""
+        message=payload.message.strip()
+        if len(message)<2:abort(422,'请写一句需要店员协助的话')
+        sid=optional_guest(authorization)
+        ts=now()
+        with db.tx() as c:
+            order_id=None
+            if payload.order_id:
+                if not sid:abort(401,'关联订单需要当前会话')
+                owned=c.execute('SELECT id FROM orders WHERE id=? AND session_id=?',(payload.order_id,sid)).fetchone()
+                if not owned:abort(404,'订单不存在')
+                order_id=payload.order_id
+            cur=c.execute('INSERT INTO help_requests(session_id,order_id,message,created_at) VALUES(?,?,?,?)',
+                          (sid,order_id,message,ts))
+            request_id=cur.lastrowid
+            db.audit(c,'visitor','HELP_REQUEST',(sid or 'anonymous')[:12])
+        return {'id':request_id,'created_at':ts,'session_recorded':sid is not None,'order_id':order_id,
+                'physical_door_opened':False,'door_authorized':False,'payment_required_to_leave':False}
 
     @app.get('/api/orders')
     def my_orders(sid:str=Depends(guest)):
@@ -764,8 +797,17 @@ def create_app(settings:Settings|None=None)->FastAPI:
     @app.get('/api/admin/orders',dependencies=[Depends(admin)])
     def admin_orders():
         with db.connect() as c:
-            return [asdict(x) for x in c.execute('''SELECT id,status,total_cents,created_at,paid_at,expires_at
-                                                    FROM orders ORDER BY created_at DESC LIMIT 100''')]
+            return [asdict(x) for x in c.execute('''SELECT o.id,o.status,o.total_cents,o.created_at,o.paid_at,o.expires_at,
+                    (SELECT provider FROM payments WHERE order_id=o.id ORDER BY created_at DESC LIMIT 1) provider,
+                    (SELECT verified FROM payments WHERE order_id=o.id ORDER BY created_at DESC LIMIT 1) verified
+                    FROM orders o ORDER BY o.created_at DESC LIMIT 100''')]
+
+    @app.get('/api/admin/help-requests',dependencies=[Depends(admin)])
+    def admin_help_requests():
+        with db.connect() as c:
+            rows=[asdict(x) for x in c.execute('''SELECT id,session_id,order_id,message,created_at
+                                                  FROM help_requests ORDER BY id DESC LIMIT 50''')]
+        return {'physical_door_opened':False,'payment_required_to_leave':False,'requests':rows}
 
     @app.get('/api/admin/stock-movements',dependencies=[Depends(admin)])
     def stock_movements(limit:int=Query(default=100,ge=1,le=500)):
