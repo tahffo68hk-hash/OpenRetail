@@ -86,6 +86,8 @@ with TestClient(create_app(cfg)) as backend,sync_playwright() as pw:
  p.wait_for_function("document.querySelector('#help-list').textContent.includes('请到货架帮忙') && document.querySelector('[data-find-order]')")
  p.locator('[data-find-order]').click()
  p.wait_for_function("document.querySelector('#order-lookup-status').textContent.includes('已找到订单') && document.querySelector('#order-lookup-status').textContent.includes('非真实资金') && document.querySelector('#help-list').textContent.includes('请到货架帮忙') && document.querySelector('#help-list').textContent.includes('待处理')")
+ p.locator('#jump-help').click()
+ p.wait_for_function("document.querySelector('#help-status').value==='attention' && document.querySelector('#help-list').textContent.includes('请到货架帮忙') && document.querySelector('#help-list').textContent.includes('待处理') && !document.querySelector('#help-list').textContent.includes('已确认')")
  p.wait_for_function("document.querySelector('#door-event-list').textContent.includes('SESSION_ISSUED')")
  p.wait_for_function("document.querySelector('#door-lock-note').textContent.includes('physical_door_opened=false')")
  p.locator('#issue-invite').click()

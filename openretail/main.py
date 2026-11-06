@@ -1230,12 +1230,25 @@ def create_app(settings:Settings|None=None)->FastAPI:
             'Content-Disposition':f'attachment; filename="{filename}"',
             'X-OpenRetail-Live-Replaced':'false'})
 
-    @app.get('/api/admin/help-requests',dependencies=[Depends(admin)])
-    def admin_help_requests():
+    @app.get('/api/admin/help-requests')
+    def admin_help_requests(status:str=Query(default=''), actor:str=Depends(admin)):
+        """Read help notes. status=attention is OPEN plus ACKNOWLEDGED, the summary's unfinished set."""
+        chosen=status.strip()
+        if chosen=='all':chosen=''
+        if chosen not in ('','attention','OPEN','ACKNOWLEDGED','RESOLVED'):
+            abort(422,'求助筛选只能是全部、未结案或单一状态')
+        sql='SELECT id,session_id,order_id,message,created_at,status FROM help_requests'
+        params=[]
+        if chosen=='attention':
+            sql+=" WHERE status IN ('OPEN','ACKNOWLEDGED')"
+        elif chosen:
+            sql+=' WHERE status=?'
+            params.append(chosen)
+        sql+=' ORDER BY id DESC LIMIT 50'
         with db.connect() as c:
-            rows=[asdict(x) for x in c.execute('''SELECT id,session_id,order_id,message,created_at,status
-                                                  FROM help_requests ORDER BY id DESC LIMIT 50''')]
-        return {'physical_door_opened':False,'payment_required_to_leave':False,'requests':rows}
+            rows=[asdict(x) for x in c.execute(sql,params)]
+        return {'physical_door_opened':False,'payment_required_to_leave':False,'door_authorized':False,
+                'status':chosen,'requests':rows}
 
     @app.post('/api/admin/help-requests/{request_id}/status')
     def update_help_status(request_id:int,payload:HelpStatus, actor:str=Depends(admin)):

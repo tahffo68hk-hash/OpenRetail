@@ -56,7 +56,7 @@
         <section id="admin-today" class="admin-section">
           <h2 class="admin-section-title">今日需要处理</h2>
           <div class="metrics"><div class="metric"><span>已付订单（含模拟）</span><strong id="m-orders">—</strong></div><div class="metric"><span>模拟销售额（非真实资金）</span><strong id="m-sales">—</strong></div><div class="metric"><span>已验签金额（真实资金）</span><strong id="m-real">—</strong></div><div class="metric"><span>商品 SKU</span><strong id="m-products">—</strong></div><div class="metric"><span>进店动作</span><strong id="m-entries">—</strong></div></div>
-          <article class="surface" id="ops-summary"><div class="surface-heading"><div><h2>今日需要处理</h2><p>今日按门店时区的自然日，默认 Asia/Shanghai。低库存看账面数量。预留仍是未结算占用，不是第二套库存。</p></div></div><p id="today-summary" class="inline-note">登录后显示</p><p id="help-attention" class="inline-note">求助未结案：—</p><p id="holding-attention" class="inline-note">未付款占用 —</p><button type="button" id="jump-holding" class="btn secondary">查看未付款占用</button><div id="low-stock-list" class="events"><p class="muted">没有达到阈值的商品</p></div></article>
+          <article class="surface" id="ops-summary"><div class="surface-heading"><div><h2>今日需要处理</h2><p>今日按门店时区的自然日，默认 Asia/Shanghai。低库存看账面数量。预留仍是未结算占用，不是第二套库存。</p></div></div><p id="today-summary" class="inline-note">登录后显示</p><p id="help-attention" class="inline-note">求助未结案：—</p><button type="button" id="jump-help" class="btn secondary">查看待处理求助</button><p id="holding-attention" class="inline-note">未付款占用 —</p><button type="button" id="jump-holding" class="btn secondary">查看未付款占用</button><div id="low-stock-list" class="events"><p class="muted">没有达到阈值的商品</p></div></article>
         </section>
         <section id="admin-products" class="admin-section">
           <h2 class="admin-section-title">商品</h2>
@@ -83,7 +83,7 @@
         </section>
         <section id="admin-help" class="admin-section">
           <h2 class="admin-section-title">求助</h2>
-          <article class="surface"><div class="surface-heading"><div><h2>顾客求助</h2><p>确认或处理完成都不会开门，也不要求顾客付款才能离开。</p></div></div><div id="help-list" class="events"><p class="muted">没有求助</p></div></article>
+          <article class="surface"><div class="surface-heading"><div><h2>顾客求助</h2><p>确认或处理完成都不会开门，也不要求顾客付款才能离开。未结案含已确认，和今日摘要是同一批。</p></div></div><form id="help-filter" class="product-form"><label>状态<select id="help-status" name="status"><option value="">全部</option><option value="attention">未结案（含已确认）</option><option value="OPEN">待处理</option><option value="ACKNOWLEDGED">已确认</option><option value="RESOLVED">已处理</option></select></label><button class="btn secondary" type="submit">筛选求助</button></form><div id="help-list" class="events"><p class="muted">没有求助</p></div></article>
         </section>
         <section id="admin-backup" class="admin-section">
           <h2 class="admin-section-title">备份</h2>
