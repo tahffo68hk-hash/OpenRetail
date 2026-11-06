@@ -85,10 +85,12 @@ $('issue-invite').onclick=()=>run(async()=>{
  try{const r=await api('/api/admin/checkout-invite',{admin:true,method:'POST'});
   if(r.duplicate)return;
   if(r.identity_verified||r.door_authorized||r.physical_door_opened||r.payment_required_to_leave)throw Error('邀请码不应核验身份或开门');
+  $('invite-code').value=r.invite;
   $('invite-result').textContent='结账邀请码 '+r.invite+' · 约 '+(r.lifetime_seconds||120)+' 秒 · 有效期至 '+time(r.expires_at)+' · identity_verified=false · door_authorized=false · physical_door_opened=false · 不能作为进门凭证';
   $('invite-qr').src=r.qr_data_uri;$('invite-qr').hidden=false;
  }finally{state.issuing=false;$('issue-invite').disabled=false}
 });
+$('invite-copy').onclick=()=>run(async()=>{const code=$('invite-code').value;if(!code)throw Error('还没有邀请码');$('invite-code').focus();$('invite-code').select();try{await navigator.clipboard.writeText(code);toast('邀请码已复制')}catch{toast('邀请码已选中，可手动复制')}});
 $('cancel-order-btn').onclick=()=>run(async()=>{if(!state.orderId)return;
  const r=await api('/api/orders/'+state.orderId+'/cancel',{method:'POST',guest:true});
  state.orderId='';state.orderTotal=null;state.orderLines=null;$('pay-btn').disabled=true;$('cancel-order-btn').disabled=true;

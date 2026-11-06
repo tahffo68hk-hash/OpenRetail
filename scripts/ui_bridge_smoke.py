@@ -100,10 +100,15 @@ with TestClient(create_app(cfg)) as backend,sync_playwright() as pw:
  p.wait_for_function("(()=>{const t=document.querySelector('#event-list').textContent;return !t.includes('盗窃')&&!t.includes('偷盗')&&!t.includes('未付款离店')})()")
  p.wait_for_function("document.querySelector('#door-lock-note').textContent.includes('physical_door_opened=false')")
  p.wait_for_function("document.querySelector('#door-contact').textContent.includes('门磁未配置') && document.querySelector('#door-contact').textContent.includes('physical_door_opened=false') && !document.querySelector('#door-contact').textContent.includes('已开锁')")
+ p.locator('#invite-copy').click()
+ p.wait_for_function("document.querySelector('#toast').textContent.includes('还没有邀请码')")
  p.evaluate("() => { const b=document.querySelector('#issue-invite'); b.click(); b.click(); }")
  p.wait_for_function("document.querySelector('#invite-result').textContent.includes('120') && document.querySelector('#invite-result').textContent.includes('identity_verified=false') && document.querySelector('#invite-result').textContent.includes('door_authorized=false') && document.querySelector('#invite-result').textContent.includes('physical_door_opened=false') && document.querySelector('#invite-result').textContent.includes('不能作为进门凭证') && document.querySelector('#invite-qr').hidden===false")
+ p.locator('#invite-copy').click()
+ p.wait_for_function("(()=>{const t=document.querySelector('#toast').textContent;const code=document.querySelector('#invite-code').value;return (t.includes('邀请码已复制')||t.includes('邀请码已选中，可手动复制'))&&code.length>=24&&!code.includes(' ')&&document.querySelector('#invite-result').textContent.includes(code)})()")
  with backend.app.state.db.connect() as conn:
   assert conn.execute('SELECT COUNT(*) n FROM checkout_invites').fetchone()['n']==1
+  assert conn.execute("SELECT COUNT(*) n FROM audit_events WHERE action='INVITE_CREATED'").fetchone()['n']==1
  p.locator('[data-help-status="ACKNOWLEDGED"]').click()
  p.wait_for_function("document.querySelector('#help-list').textContent.includes('已确认')")
  p.wait_for_function("document.querySelector('#ledger-balance').textContent.includes('一致')")
@@ -162,7 +167,7 @@ with TestClient(create_app(cfg)) as backend,sync_playwright() as pw:
  assert '6900000099991' not in p.locator('#catalog').inner_text()
  p.locator('[data-panel="admin"]').click()
  p.wait_for_function("document.querySelector('#ledger-balance').textContent.includes('一致')")
- code=p.locator('#invite-result').inner_text().split('结账邀请码 ',1)[1].split(' · ',1)[0]
+ code=p.locator('#invite-code').input_value()
  p.locator('[data-panel="shop"]').click()
  p.locator('#invite-token').fill(code)
  p.evaluate("() => { const b=document.querySelector('#redeem-btn'); b.click(); b.click(); }")
