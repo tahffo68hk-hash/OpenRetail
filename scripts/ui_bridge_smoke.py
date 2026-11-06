@@ -127,8 +127,12 @@ with TestClient(create_app(cfg)) as backend,sync_playwright() as pw:
  p.wait_for_function("document.querySelector('#today-summary').textContent.includes('模拟销售额（非真实资金）') && document.querySelector('#today-summary').textContent.includes('已验签金额（真实资金） ¥0.00') && document.querySelector('#today-summary').textContent.includes('¥2.00') && document.querySelector('#today-summary').textContent.includes('Asia/Shanghai')")
  p.wait_for_function("document.querySelector('#store-timezone').value==='Asia/Shanghai'")
  p.wait_for_function("document.querySelector('#help-attention').textContent.includes('待处理求助')")
- p.locator('[data-mock-refund]').click()
- p.wait_for_function("document.querySelector('#order-table').textContent.includes('模拟退回')")
+ p.evaluate("() => { const b=document.querySelector('[data-mock-refund]'); b.click(); b.click(); }")
+ p.wait_for_function("document.querySelector('#toast').textContent.includes('模拟退款已回补库存，不是微信退款') && document.querySelector('#order-table').textContent.includes('模拟退回') && !document.querySelector('#toast').textContent.includes('这次没有增加库存')")
+ with backend.app.state.db.connect() as conn:
+  assert conn.execute("SELECT COUNT(*) n FROM stock_movements WHERE reason='MOCK_REFUND_RESTORE'").fetchone()['n']==1
+  assert conn.execute("SELECT COUNT(*) n FROM orders WHERE status='REFUNDED'").fetchone()['n']==1
+  assert conn.execute('SELECT COALESCE(SUM(verified),0) n FROM payments').fetchone()['n']==0
  p.locator('#product-form input[name="barcode"]').fill('6900000099991')
  p.locator('#product-form input[name="name"]').fill('烟雾测试商品')
  p.locator('#product-form input[name="price"]').fill('3.50')

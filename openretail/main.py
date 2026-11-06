@@ -210,6 +210,8 @@ def create_app(settings:Settings|None=None)->FastAPI:
     app.state.redeem_inflight=set()
     app.state.entry_guard=threading.Lock()
     app.state.entry_inflight=False
+    app.state.refund_guard=threading.Lock()
+    app.state.refund_inflight=set()
 
     @app.middleware('http')
     async def security_headers(request:Request,call_next):
@@ -827,31 +829,45 @@ def create_app(settings:Settings|None=None)->FastAPI:
     def mock_refund(order_id:str, actor:str=Depends(admin)):
         """Restore SQLite stock for an unverified mock sale. No provider refund exists."""
         mock_enabled()
-        with db.tx() as c:
-            row=c.execute('SELECT * FROM orders WHERE id=?',(order_id,)).fetchone()
-            if not row:abort(404,'订单不存在')
-            if row['status']=='REFUNDED':
+        with app.state.refund_guard:
+            if order_id in app.state.refund_inflight:
                 return mock_body(order_id=order_id,outcome='IDEMPOTENT',trade_state='REFUND',
-                                 order_status='REFUNDED',stock_restored=False)
-            if row['status']!='PAID':abort(409,'只有已模拟支付的订单可以退回库存')
-            payment=load_payment(c,order_id)
-            if not payment or payment['provider']!='MOCK_NOT_REAL_MONEY' or int(payment['verified'])!=0:
-                abort(409,'拒绝退款：不是未核验的模拟支付，不会调用真实退款接口')
-            items=c.execute('SELECT product_id,quantity FROM order_lines WHERE order_id=?',(order_id,)).fetchall()
-            for item in items:
-                product=c.execute('SELECT stock FROM products WHERE id=?',(item['product_id'],)).fetchone()
-                if not product or product['stock']+item['quantity']>1_000_000:abort(409,'退回后库存超出上限')
-            for item in items:
-                cur=c.execute('UPDATE products SET stock=stock+? WHERE id=?',(item['quantity'],item['product_id']))
-                if cur.rowcount!=1:raise RuntimeError('mock refund stock update failed')
-                db.movement(c,item['product_id'],item['quantity'],0,'MOCK_REFUND_RESTORE',order_id)
-            cur=c.execute("UPDATE orders SET status='REFUNDED' WHERE id=? AND status='PAID'",(order_id,))
-            if cur.rowcount!=1:raise RuntimeError('mock refund lost the paid row')
-            c.execute('INSERT INTO refunds(id,order_id,provider,amount_cents,created_at) VALUES(?,?,?,?,?)',
-                      ('mock_refund_'+order_id,order_id,'MOCK_NOT_REAL_MONEY',row['total_cents'],now()))
-            db.audit(c,actor,'MOCK_REFUND',order_id)
-            return mock_body(order_id=order_id,outcome='REFUNDED',trade_state='REFUND',
-                             order_status='REFUNDED',stock_restored=True)
+                                 order_status='PAID',stock_restored=False,duplicate=True,
+                                 identity_verified=False,door_authorized=False,physical_door_opened=False)
+            app.state.refund_inflight.add(order_id)
+        try:
+            hold=getattr(app.state,'hold_refund',None)
+            if hold:hold()
+            with db.tx() as c:
+                row=c.execute('SELECT * FROM orders WHERE id=?',(order_id,)).fetchone()
+                if not row:abort(404,'订单不存在')
+                if row['status']=='REFUNDED':
+                    return mock_body(order_id=order_id,outcome='IDEMPOTENT',trade_state='REFUND',
+                                     order_status='REFUNDED',stock_restored=False,duplicate=False,
+                                     identity_verified=False,door_authorized=False,physical_door_opened=False)
+                if row['status']!='PAID':abort(409,'只有已模拟支付的订单可以退回库存')
+                payment=load_payment(c,order_id)
+                if not payment or payment['provider']!='MOCK_NOT_REAL_MONEY' or int(payment['verified'])!=0:
+                    abort(409,'拒绝退款：不是未核验的模拟支付，不会调用真实退款接口')
+                items=c.execute('SELECT product_id,quantity FROM order_lines WHERE order_id=?',(order_id,)).fetchall()
+                for item in items:
+                    product=c.execute('SELECT stock FROM products WHERE id=?',(item['product_id'],)).fetchone()
+                    if not product or product['stock']+item['quantity']>1_000_000:abort(409,'退回后库存超出上限')
+                for item in items:
+                    cur=c.execute('UPDATE products SET stock=stock+? WHERE id=?',(item['quantity'],item['product_id']))
+                    if cur.rowcount!=1:raise RuntimeError('mock refund stock update failed')
+                    db.movement(c,item['product_id'],item['quantity'],0,'MOCK_REFUND_RESTORE',order_id)
+                cur=c.execute("UPDATE orders SET status='REFUNDED' WHERE id=? AND status='PAID'",(order_id,))
+                if cur.rowcount!=1:raise RuntimeError('mock refund lost the paid row')
+                c.execute('INSERT INTO refunds(id,order_id,provider,amount_cents,created_at) VALUES(?,?,?,?,?)',
+                          ('mock_refund_'+order_id,order_id,'MOCK_NOT_REAL_MONEY',row['total_cents'],now()))
+                db.audit(c,actor,'MOCK_REFUND',order_id)
+                return mock_body(order_id=order_id,outcome='REFUNDED',trade_state='REFUND',
+                                 order_status='REFUNDED',stock_restored=True,duplicate=False,
+                                 identity_verified=False,door_authorized=False,physical_door_opened=False)
+        finally:
+            with app.state.refund_guard:
+                app.state.refund_inflight.discard(order_id)
 
     @app.post('/api/orders/{order_id}/wechat-native')
     def initiate_wechat(order_id:str,sid:str=Depends(guest)):
