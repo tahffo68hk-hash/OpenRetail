@@ -175,7 +175,7 @@ class StockChange(BaseModel):
     quantity_delta:int=Field(ge=-100_000,le=100_000)
     reason:str=Field(min_length=4,max_length=120)
 class HelpInput(BaseModel):
-    message:str=Field(min_length=2,max_length=400)
+    message:str=Field(min_length=0,max_length=400)
     order_id:str|None=Field(default=None,max_length=64)
 class HelpStatus(BaseModel):
     status:str
