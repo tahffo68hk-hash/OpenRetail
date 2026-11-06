@@ -225,8 +225,13 @@ with TestClient(create_app(cfg)) as backend,sync_playwright() as pw:
  with backend.app.state.db.connect() as conn:
   assert conn.execute("SELECT stock FROM products WHERE barcode='6900000099991'").fetchone()['stock']==6
   assert conn.execute("SELECT COUNT(*) n FROM audit_events WHERE action='STOCK_ADJUST' AND detail LIKE '6900000099991:%'").fetchone()['n']==1
- p.locator('[data-listing-barcode="6900000099991"]').click()
+ p.evaluate("() => { const b=document.querySelector('[data-listing-barcode=\"6900000099991\"]'); b.click(); b.click(); }")
  p.wait_for_function("document.querySelector('#product-status').textContent.includes('已下架') && document.querySelector('#product-status').textContent.includes('库存仍为 6')")
+ with backend.app.state.db.connect() as conn:
+  listed=conn.execute("SELECT stock,reserved_stock,active FROM products WHERE barcode='6900000099991'").fetchone()
+  assert listed['stock']==6 and listed['reserved_stock']==0 and listed['active']==0
+  assert conn.execute("SELECT COUNT(*) n FROM audit_events WHERE action='PRODUCT_UNLISTED' AND detail='6900000099991'").fetchone()['n']==1
+  assert conn.execute("SELECT COUNT(*) n FROM audit_events WHERE action='PRODUCT_LISTED' AND detail='6900000099991'").fetchone()['n']==0
  p.wait_for_function("document.querySelector('#audit-list').textContent.includes('PRODUCT_UNLISTED') && document.querySelector('#audit-list').textContent.includes('6900000099991')")
  p.locator('#audit-action').fill('PRODUCT_UNLISTED')
  p.locator('#audit-filter button[type="submit"]').click()

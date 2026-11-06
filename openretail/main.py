@@ -256,6 +256,8 @@ def create_app(settings:Settings|None=None)->FastAPI:
     app.state.create_inflight=set()
     app.state.edit_guard=threading.Lock()
     app.state.edit_inflight=set()
+    app.state.listing_guard=threading.Lock()
+    app.state.listing_inflight=set()
 
     @app.middleware('http')
     async def security_headers(request:Request,call_next):
@@ -1274,22 +1276,39 @@ def create_app(settings:Settings|None=None)->FastAPI:
     @app.post('/api/admin/products/{product_id}/listing')
     def set_listing(product_id:int,payload:ListingInput, actor:str=Depends(admin)):
         """上架/下架 one SKU. Stock, reservations, and the ledger stay unchanged."""
-        with db.tx() as c:
-            current=c.execute('SELECT id,barcode,stock,reserved_stock,active FROM products WHERE id=?',(product_id,)).fetchone()
-            if not current:abort(404,'商品不存在')
-            before_moves=c.execute('SELECT COUNT(*) n FROM stock_movements WHERE product_id=?',(product_id,)).fetchone()['n']
-            desired=1 if payload.active else 0
-            outcome='IDEMPOTENT' if current['active']==desired else ('LISTED' if desired else 'UNLISTED')
-            if outcome!='IDEMPOTENT':
-                c.execute('UPDATE products SET active=? WHERE id=?',(desired,product_id))
-                db.audit(c,actor,'PRODUCT_'+outcome,current['barcode'])
-            after=c.execute('SELECT stock,reserved_stock,active FROM products WHERE id=?',(product_id,)).fetchone()
-            after_moves=c.execute('SELECT COUNT(*) n FROM stock_movements WHERE product_id=?',(product_id,)).fetchone()['n']
-            if after['stock']!=current['stock'] or after['reserved_stock']!=current['reserved_stock'] or after_moves!=before_moves:
-                raise RuntimeError('listing changed stock or the ledger')
-        return {'id':product_id,'barcode':current['barcode'],'active':bool(after['active']),'outcome':outcome,
-                'stock':after['stock'],'reserved_stock':after['reserved_stock'],'stock_changed':False,
-                'physical_door_opened':False,'real_door_enabled':False}
+        with app.state.listing_guard:
+            if product_id in app.state.listing_inflight:
+                with db.connect() as c:
+                    current=c.execute('SELECT barcode,stock,reserved_stock,active FROM products WHERE id=?',(product_id,)).fetchone()
+                if not current:abort(404,'商品不存在')
+                return {'id':product_id,'barcode':current['barcode'],'active':bool(current['active']),'outcome':'IDEMPOTENT',
+                        'stock':current['stock'],'reserved_stock':current['reserved_stock'],'stock_changed':False,
+                        'physical_door_opened':False,'real_door_enabled':False,'identity_verified':False,
+                        'door_authorized':False,'duplicate':True,'applied':False,'system_of_record':'sqlite'}
+            app.state.listing_inflight.add(product_id)
+        try:
+            hold=getattr(app.state,'hold_listing',None)
+            if hold:hold()
+            with db.tx() as c:
+                current=c.execute('SELECT id,barcode,stock,reserved_stock,active FROM products WHERE id=?',(product_id,)).fetchone()
+                if not current:abort(404,'商品不存在')
+                before_moves=c.execute('SELECT COUNT(*) n FROM stock_movements WHERE product_id=?',(product_id,)).fetchone()['n']
+                desired=1 if payload.active else 0
+                outcome='IDEMPOTENT' if current['active']==desired else ('LISTED' if desired else 'UNLISTED')
+                if outcome!='IDEMPOTENT':
+                    c.execute('UPDATE products SET active=? WHERE id=?',(desired,product_id))
+                    db.audit(c,actor,'PRODUCT_'+outcome,current['barcode'])
+                after=c.execute('SELECT stock,reserved_stock,active FROM products WHERE id=?',(product_id,)).fetchone()
+                after_moves=c.execute('SELECT COUNT(*) n FROM stock_movements WHERE product_id=?',(product_id,)).fetchone()['n']
+                if after['stock']!=current['stock'] or after['reserved_stock']!=current['reserved_stock'] or after_moves!=before_moves:
+                    raise RuntimeError('listing changed stock or the ledger')
+            return {'id':product_id,'barcode':current['barcode'],'active':bool(after['active']),'outcome':outcome,
+                    'stock':after['stock'],'reserved_stock':after['reserved_stock'],'stock_changed':False,
+                    'physical_door_opened':False,'real_door_enabled':False,'identity_verified':False,
+                    'door_authorized':False,'duplicate':False,'applied':outcome!='IDEMPOTENT','system_of_record':'sqlite'}
+        finally:
+            with app.state.listing_guard:
+                app.state.listing_inflight.discard(product_id)
 
     @app.post('/api/admin/products/{product_id}/adjust-stock')
     def adjust_stock(product_id:int,payload:StockChange, actor:str=Depends(admin)):
