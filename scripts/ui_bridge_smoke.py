@@ -133,6 +133,25 @@ with TestClient(create_app(cfg)) as backend,sync_playwright() as pw:
   assert conn.execute("SELECT COUNT(*) n FROM stock_movements WHERE reason='MOCK_REFUND_RESTORE'").fetchone()['n']==1
   assert conn.execute("SELECT COUNT(*) n FROM orders WHERE status='REFUNDED'").fetchone()['n']==1
   assert conn.execute('SELECT COALESCE(SUM(verified),0) n FROM payments').fetchone()['n']==0
+ with backend.app.state.db.connect() as conn:
+  products_before=conn.execute('SELECT COUNT(*) n FROM products').fetchone()['n']
+ p.locator('#product-form input[name="barcode"]').fill('   ')
+ p.locator('#product-form input[name="name"]').fill('不应新增')
+ p.locator('#product-form input[name="price"]').fill('1.00')
+ p.locator('#product-form input[name="stock"]').fill('1')
+ p.locator('#product-form button[type="submit"]').click()
+ p.wait_for_function("document.querySelector('#product-status').textContent==='请输入商品条码' && document.querySelector('#toast').textContent.includes('请输入商品条码') && !document.querySelector('#product-status').textContent.includes('找不到条码')")
+ p.locator('#edit-form input[name="barcode"]').fill('  ')
+ p.locator('#edit-form input[name="name"]').fill('不应改名')
+ p.locator('#edit-form input[name="price"]').fill('2.00')
+ p.locator('#edit-form button[type="submit"]').click()
+ p.wait_for_function("document.querySelector('#product-status').textContent==='请输入商品条码'")
+ p.locator('#adjust-form input[name="barcode"]').fill('\t')
+ p.locator('#adjust-form input[name="delta"]').fill('1')
+ p.locator('#adjust-form button[type="submit"]').click()
+ p.wait_for_function("document.querySelector('#product-status').textContent==='请输入商品条码'")
+ with backend.app.state.db.connect() as conn:
+  assert conn.execute('SELECT COUNT(*) n FROM products').fetchone()['n']==products_before
  p.locator('#product-form input[name="barcode"]').fill('6900000099991')
  p.locator('#product-form input[name="name"]').fill('烟雾测试商品')
  p.locator('#product-form input[name="price"]').fill('3.50')

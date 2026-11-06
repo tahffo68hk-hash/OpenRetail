@@ -149,7 +149,7 @@ class LineQuantity(BaseModel):
     quantity:int=Field(ge=0,le=30)
 
 class ProductInput(BaseModel):
-    barcode:str=Field(min_length=1,max_length=64)
+    barcode:str=Field(min_length=0,max_length=64)
     name:str=Field(min_length=1,max_length=120)
     price_cents:int=Field(ge=1,le=100_000_000)
     stock:int=Field(ge=0,le=1_000_000)
@@ -1101,17 +1101,33 @@ def create_app(settings:Settings|None=None)->FastAPI:
             rows=[asdict(r) for r in c.execute(sql+' ORDER BY id',params)]
         return rows
 
+    @app.get('/api/admin/products/by-barcode/')
+    def admin_product_by_barcode_blank(actor:str=Depends(admin)):
+        abort(422,'请输入商品条码')
+
+    @app.get('/api/admin/products/by-barcode/{barcode}')
+    def admin_product_by_barcode(barcode:str, actor:str=Depends(admin)):
+        """Lookup one SKU for the edit and stock-adjust forms. Blank input is not a search."""
+        code=barcode.strip()
+        if not code:abort(422,'请输入商品条码')
+        with db.connect() as c:
+            row=c.execute('SELECT * FROM products WHERE barcode=?',(code,)).fetchone()
+        if not row:abort(404,'找不到条码 '+code)
+        return asdict(row)
+
     @app.post('/api/admin/products')
     def create_product(payload:ProductInput, actor:str=Depends(admin)):
         """Add one SQLite catalog row. Duplicate barcodes are not an overwrite."""
+        barcode=payload.barcode.strip()
+        if not barcode:abort(422,'请输入商品条码')
         with db.tx() as c:
             db.expire(c,now())
-            if c.execute('SELECT id FROM products WHERE barcode=?',(payload.barcode,)).fetchone():
+            if c.execute('SELECT id FROM products WHERE barcode=?',(barcode,)).fetchone():
                 abort(409,'条码已存在。请只改名称售价，或做单品库存调整；不要整表覆盖。')
             cur=c.execute('INSERT INTO products(barcode,name,price_cents,stock,active) VALUES(?,?,?,?,?)',
-                          (payload.barcode,payload.name,payload.price_cents,payload.stock,int(payload.active)))
-            db.movement(c,cur.lastrowid,payload.stock,0,'OPENING_BALANCE',payload.barcode)
-            db.audit(c,actor,'PRODUCT_CREATED',payload.barcode)
+                          (barcode,payload.name,payload.price_cents,payload.stock,int(payload.active)))
+            db.movement(c,cur.lastrowid,payload.stock,0,'OPENING_BALANCE',barcode)
+            db.audit(c,actor,'PRODUCT_CREATED',barcode)
             row=c.execute('SELECT id,barcode,name,price_cents,stock,reserved_stock FROM products WHERE id=?',(cur.lastrowid,)).fetchone()
         return {**asdict(row),'created':True,'system_of_record':'sqlite'}
 
