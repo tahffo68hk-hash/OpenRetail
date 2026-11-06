@@ -228,6 +228,8 @@ def create_app(settings:Settings|None=None)->FastAPI:
     app.state.entry_inflight=False
     app.state.door_guard=threading.Lock()
     app.state.door_inflight=set()
+    app.state.cancel_guard=threading.Lock()
+    app.state.cancel_inflight=set()
     app.state.refund_guard=threading.Lock()
     app.state.refund_inflight=set()
 
@@ -643,15 +645,34 @@ def create_app(settings:Settings|None=None)->FastAPI:
 
     @app.post('/api/orders/{order_id}/cancel')
     def cancel_order(order_id:str,sid:str=Depends(guest)):
-        with db.tx() as c:
-            db.expire(c,now())
-            o=order_owned(c,order_id,sid)
-            if o['status']=='CANCELLED':return row_order(c,order_id)
-            if o['status']!='PENDING':abort(409,'已进入支付流程或已付款，不能直接取消')
-            db.release(c,order_id,'ORDER_CANCELLED')
-            c.execute("UPDATE orders SET status='CANCELLED' WHERE id=?",(order_id,))
-            db.audit(c,'visitor','ORDER_CANCELLED',order_id)
-            return row_order(c,order_id)
+        with app.state.cancel_guard:
+            if order_id in app.state.cancel_inflight:
+                return {'duplicate':True,'id':order_id,'status':None,
+                        'physical_door_opened':False,'identity_verified':False,'door_authorized':False}
+            app.state.cancel_inflight.add(order_id)
+        try:
+            hold=getattr(app.state,'hold_cancel',None)
+            if hold:hold()
+            with db.tx() as c:
+                db.expire(c,now())
+                o=order_owned(c,order_id,sid)
+                if o['status']=='CANCELLED':
+                    body=row_order(c,order_id)
+                elif o['status']!='PENDING':
+                    abort(409,'已进入支付流程或已付款，不能直接取消')
+                else:
+                    db.release(c,order_id,'ORDER_CANCELLED')
+                    c.execute("UPDATE orders SET status='CANCELLED' WHERE id=?",(order_id,))
+                    db.audit(c,'visitor','ORDER_CANCELLED',order_id)
+                    body=row_order(c,order_id)
+                body['duplicate']=False
+                body['physical_door_opened']=False
+                body['identity_verified']=False
+                body['door_authorized']=False
+                return body
+        finally:
+            with app.state.cancel_guard:
+                app.state.cancel_inflight.discard(order_id)
 
     @app.post('/api/orders/{order_id}/lines')
     def set_line_quantity(order_id:str, payload:LineQuantity, sid:str=Depends(guest)):

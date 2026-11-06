@@ -1,6 +1,6 @@
 'use strict';
 const $=id=>document.getElementById(id);
-const state={products:[],cart:new Map(),token:sessionStorage.getItem('retail_guest')||'',csrf:'',orderId:'',lastOrderId:'',orderTotal:null,orderLines:null,paying:false,helping:false,issuing:false,redeeming:false,entering:false,opening:false,refunding:new Set(),paymentPollId:null,paymentProvider:'MOCK_ONLY',demo:true,inviteRequired:false,scanner:null,scanTimer:null};
+const state={products:[],cart:new Map(),token:sessionStorage.getItem('retail_guest')||'',csrf:'',orderId:'',lastOrderId:'',orderTotal:null,orderLines:null,paying:false,helping:false,issuing:false,redeeming:false,entering:false,opening:false,cancelling:false,refunding:new Set(),paymentPollId:null,paymentProvider:'MOCK_ONLY',demo:true,inviteRequired:false,scanner:null,scanTimer:null};
 const money=cents=>'¥'+(Number(cents||0)/100).toFixed(2);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const time=t=>t?new Date(t*1000).toLocaleString('zh-CN'):'—';
@@ -91,12 +91,7 @@ $('issue-invite').onclick=()=>run(async()=>{
  }finally{state.issuing=false;$('issue-invite').disabled=false}
 });
 $('invite-copy').onclick=()=>run(async()=>{const code=$('invite-code').value;if(!code)throw Error('还没有邀请码');$('invite-code').focus();$('invite-code').select();try{await navigator.clipboard.writeText(code);toast('邀请码已复制')}catch{toast('邀请码已选中，可手动复制')}});
-$('cancel-order-btn').onclick=()=>run(async()=>{if(!state.orderId)return;
- const r=await api('/api/orders/'+state.orderId+'/cancel',{method:'POST',guest:true});
- state.orderId='';state.orderTotal=null;state.orderLines=null;$('pay-btn').disabled=true;$('cancel-order-btn').disabled=true;
- $('payment-qr').hidden=true;showPay(r);await refreshMine();
- await loadProducts();toast('已取消未付款订单');
-});
+$('cancel-order-btn').onclick=()=>run(async()=>{if(state.cancelling)return;if(!state.orderId)return;const orderId=state.orderId;state.cancelling=true;$('cancel-order-btn').disabled=true;try{const r=await api('/api/orders/'+orderId+'/cancel',{method:'POST',guest:true});if(r.duplicate)return;if(r.physical_door_opened||r.identity_verified||r.door_authorized)throw Error('取消订单不应开门');state.orderId='';state.orderTotal=null;state.orderLines=null;$('pay-btn').disabled=true;$('cancel-order-btn').disabled=true;$('payment-qr').hidden=true;showPay(r);await refreshMine();await loadProducts();toast('已取消未付款订单')}finally{state.cancelling=false;if(state.orderId)$('cancel-order-btn').disabled=false}});
 async function pollVerifiedPayment(orderId){
  if(state.paymentPollId)clearTimeout(state.paymentPollId);
  const began=Date.now();
