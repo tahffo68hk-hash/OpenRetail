@@ -18,6 +18,7 @@ import hmac
 import json
 import secrets
 import sqlite3
+import threading
 import time
 from pathlib import Path
 from uuid import uuid4
@@ -201,6 +202,8 @@ def create_app(settings:Settings|None=None)->FastAPI:
     app.state.config=cfg
     app.state.ha=ha
     app.state.wechat=wechat
+    app.state.help_guard=threading.Lock()
+    app.state.help_inflight=set()
 
     @app.middleware('http')
     async def security_headers(request:Request,call_next):
@@ -486,20 +489,34 @@ def create_app(settings:Settings|None=None)->FastAPI:
         message=payload.message.strip()
         if len(message)<2:abort(422,'请写一句需要店员协助的话')
         sid=optional_guest(authorization)
-        ts=now()
-        with db.tx() as c:
-            order_id=None
-            if payload.order_id:
-                if not sid:abort(401,'关联订单需要当前会话')
-                owned=c.execute('SELECT id FROM orders WHERE id=? AND session_id=?',(payload.order_id,sid)).fetchone()
-                if not owned:abort(404,'订单不存在')
-                order_id=payload.order_id
-            cur=c.execute('''INSERT INTO help_requests(session_id,order_id,message,created_at,status)
-                             VALUES(?,?,?,?,?)''',(sid,order_id,message,ts,'OPEN'))
-            request_id=cur.lastrowid
-            db.audit(c,'visitor','HELP_REQUEST',(sid or 'anonymous')[:12])
-        return {'id':request_id,'created_at':ts,'session_recorded':sid is not None,'order_id':order_id,
-                'physical_door_opened':False,'door_authorized':False,'payment_required_to_leave':False}
+        key=(sid or '',message)
+        with app.state.help_guard:
+            if key in app.state.help_inflight:
+                return {'id':None,'created_at':None,'session_recorded':sid is not None,'order_id':None,
+                        'duplicate':True,'physical_door_opened':False,'door_authorized':False,
+                        'payment_required_to_leave':False}
+            app.state.help_inflight.add(key)
+        try:
+            hold=getattr(app.state,'hold_help',None)
+            if hold:hold()
+            ts=now()
+            with db.tx() as c:
+                order_id=None
+                if payload.order_id:
+                    if not sid:abort(401,'关联订单需要当前会话')
+                    owned=c.execute('SELECT id FROM orders WHERE id=? AND session_id=?',(payload.order_id,sid)).fetchone()
+                    if not owned:abort(404,'订单不存在')
+                    order_id=payload.order_id
+                cur=c.execute('''INSERT INTO help_requests(session_id,order_id,message,created_at,status)
+                                 VALUES(?,?,?,?,?)''',(sid,order_id,message,ts,'OPEN'))
+                request_id=cur.lastrowid
+                db.audit(c,'visitor','HELP_REQUEST',(sid or 'anonymous')[:12])
+            return {'id':request_id,'created_at':ts,'session_recorded':sid is not None,'order_id':order_id,
+                    'duplicate':False,'physical_door_opened':False,'door_authorized':False,
+                    'payment_required_to_leave':False}
+        finally:
+            with app.state.help_guard:
+                app.state.help_inflight.discard(key)
 
     @app.get('/api/orders')
     def my_orders(sid:str=Depends(guest)):
