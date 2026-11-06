@@ -21,6 +21,7 @@ import sqlite3
 import threading
 import time
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 from fastapi import FastAPI,Header,HTTPException,Depends,UploadFile,File,Query,Request,Response
@@ -57,6 +58,21 @@ def store_zone(c):
     name=row['value'] if row and row['value'] else 'Asia/Shanghai'
     try:return name,ZoneInfo(name)
     except Exception:abort(500,'门店时区配置无效')
+
+def require_price_cents(value):
+    """Yuan is entered on the page; this stores integer cents. Empty, zero, and junk are not a price."""
+    if isinstance(value,str):
+        text=value.strip()
+        if not text or not text.lstrip('+').isdigit():
+            abort(422,'请输入有效售价')
+        value=int(text)
+    elif isinstance(value,float):
+        if not value.is_integer():abort(422,'请输入有效售价')
+        value=int(value)
+    if isinstance(value,bool) or not isinstance(value,int) or value<1:
+        abort(422,'请输入有效售价')
+    if value>100_000_000:abort(422,'售价超出上限')
+    return value
 
 def contains_like(text:str)->str:
     # Literal substring. % and _ in a barcode or name stay characters, not wildcards.
@@ -151,12 +167,12 @@ class LineQuantity(BaseModel):
 class ProductInput(BaseModel):
     barcode:str=Field(min_length=0,max_length=64)
     name:str=Field(min_length=0,max_length=120)
-    price_cents:int=Field(ge=1,le=100_000_000)
+    price_cents:Any=None
     stock:int=Field(ge=0,le=1_000_000)
     active:bool=True
 class ProductEdit(BaseModel):
     name:str=Field(min_length=0,max_length=120)
-    price_cents:int=Field(ge=1,le=100_000_000)
+    price_cents:Any=None
 class ListingInput(BaseModel):
     active:bool
 
@@ -1122,12 +1138,13 @@ def create_app(settings:Settings|None=None)->FastAPI:
         if not barcode:abort(422,'请输入商品条码')
         name=payload.name.strip()
         if not name:abort(422,'请输入商品名称')
+        price_cents=require_price_cents(payload.price_cents)
         with db.tx() as c:
             db.expire(c,now())
             if c.execute('SELECT id FROM products WHERE barcode=?',(barcode,)).fetchone():
                 abort(409,'条码已存在。请只改名称售价，或做单品库存调整；不要整表覆盖。')
             cur=c.execute('INSERT INTO products(barcode,name,price_cents,stock,active) VALUES(?,?,?,?,?)',
-                          (barcode,name,payload.price_cents,payload.stock,int(payload.active)))
+                          (barcode,name,price_cents,payload.stock,int(payload.active)))
             db.movement(c,cur.lastrowid,payload.stock,0,'OPENING_BALANCE',barcode)
             db.audit(c,actor,'PRODUCT_CREATED',barcode)
             row=c.execute('SELECT id,barcode,name,price_cents,stock,reserved_stock FROM products WHERE id=?',(cur.lastrowid,)).fetchone()
@@ -1138,16 +1155,17 @@ def create_app(settings:Settings|None=None)->FastAPI:
         """Name and price only. Stock and reservations stay untouched."""
         name=payload.name.strip()
         if not name:abort(422,'请输入商品名称')
+        price_cents=require_price_cents(payload.price_cents)
         with db.tx() as c:
             current=c.execute('SELECT id,barcode,stock,reserved_stock FROM products WHERE id=?',(product_id,)).fetchone()
             if not current:abort(404,'商品不存在')
             c.execute('UPDATE products SET name=?,price_cents=? WHERE id=?',
-                      (name,payload.price_cents,product_id))
+                      (name,price_cents,product_id))
             db.audit(c,actor,'PRODUCT_EDIT',current['barcode'])
             after=c.execute('SELECT stock,reserved_stock FROM products WHERE id=?',(product_id,)).fetchone()
             if after['stock']!=current['stock'] or after['reserved_stock']!=current['reserved_stock']:
                 raise RuntimeError('name/price edit changed stock')
-        return {'id':product_id,'barcode':current['barcode'],'name':name,'price_cents':payload.price_cents,
+        return {'id':product_id,'barcode':current['barcode'],'name':name,'price_cents':price_cents,
                 'stock':current['stock'],'reserved_stock':current['reserved_stock'],'stock_changed':False}
 
     @app.post('/api/admin/products/{product_id}/listing')

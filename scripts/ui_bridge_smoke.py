@@ -169,6 +169,21 @@ with TestClient(create_app(cfg)) as backend,sync_playwright() as pw:
   same=conn.execute("SELECT name,price_cents FROM products WHERE barcode='6901234567892'").fetchone()
   assert same['name']==water_name['name'] and same['price_cents']==water_name['price_cents']
  p.locator('#product-form input[name="barcode"]').fill('6900000099991')
+ p.locator('#product-form input[name="name"]').fill('不应因售价新增')
+ p.locator('#product-form input[name="price"]').evaluate("el => { el.value='0'; }")
+ p.locator('#product-form input[name="stock"]').fill('4')
+ p.locator('#product-form button[type="submit"]').click()
+ p.wait_for_function("document.querySelector('#product-status').textContent==='请输入有效售价' && document.querySelector('#toast').textContent.includes('请输入有效售价')")
+ p.locator('#edit-form input[name="barcode"]').fill('6901234567892')
+ p.locator('#edit-form input[name="name"]').fill('瓶装饮用水 550ml')
+ p.locator('#edit-form input[name="price"]').evaluate("el => { el.value=''; }")
+ p.locator('#edit-form button[type="submit"]').click()
+ p.wait_for_function("document.querySelector('#product-status').textContent==='请输入有效售价'")
+ with backend.app.state.db.connect() as conn:
+  assert conn.execute('SELECT COUNT(*) n FROM products').fetchone()['n']==products_before
+  same=conn.execute("SELECT name,price_cents FROM products WHERE barcode='6901234567892'").fetchone()
+  assert same['name']==water_name['name'] and same['price_cents']==water_name['price_cents']
+ p.locator('#product-form input[name="barcode"]').fill('6900000099991')
  p.locator('#product-form input[name="name"]').fill('烟雾测试商品')
  p.locator('#product-form input[name="price"]').fill('3.50')
  p.locator('#product-form input[name="stock"]').fill('4')
