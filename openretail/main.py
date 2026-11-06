@@ -28,7 +28,7 @@ from .database import Database
 from .security import digest,random_token,password_verify
 from .wechat import WeChatNative,PaymentSignatureError
 from .adapters import HomeAssistantAdapter,ERPNextReader,IntegrationError
-from .importer import parse_catalog,ImportErrorDetail
+from .importer import parse_catalog,write_catalog,ImportErrorDetail
 
 ROOT=Path(__file__).resolve().parent.parent
 
@@ -69,6 +69,8 @@ class StockChange(BaseModel):
 class HelpInput(BaseModel):
     message:str=Field(min_length=2,max_length=400)
     order_id:str|None=Field(default=None,max_length=64)
+class HelpStatus(BaseModel):
+    status:str
 
 
 def create_app(settings:Settings|None=None)->FastAPI:
@@ -344,8 +346,8 @@ def create_app(settings:Settings|None=None)->FastAPI:
                 owned=c.execute('SELECT id FROM orders WHERE id=? AND session_id=?',(payload.order_id,sid)).fetchone()
                 if not owned:abort(404,'订单不存在')
                 order_id=payload.order_id
-            cur=c.execute('INSERT INTO help_requests(session_id,order_id,message,created_at) VALUES(?,?,?,?)',
-                          (sid,order_id,message,ts))
+            cur=c.execute('''INSERT INTO help_requests(session_id,order_id,message,created_at,status)
+                             VALUES(?,?,?,?,?)''',(sid,order_id,message,ts,'OPEN'))
             request_id=cur.lastrowid
             db.audit(c,'visitor','HELP_REQUEST',(sid or 'anonymous')[:12])
         return {'id':request_id,'created_at':ts,'session_recorded':sid is not None,'order_id':order_id,
@@ -792,7 +794,16 @@ def create_app(settings:Settings|None=None)->FastAPI:
                 product=c.execute('SELECT id FROM products WHERE barcode=?',(p['barcode'],)).fetchone()
                 db.movement(c,product['id'],p['stock']-(old['stock'] if old else 0),0,'CSV_INITIAL_IMPORT',p['barcode'])
             db.audit(c,'operator','CSV_INITIAL_IMPORT',f'count={len(items)}')
-        return {'dry_run':False,'count':len(items),'notice':'单次初始导入完成；禁止后续覆盖订单账本'}
+        return {'dry_run':False,'count':len(items),'notice':'单次初始导入完成；禁止后续覆盖订单账本',
+                'system_of_record':'sqlite'}
+
+    @app.get('/api/admin/export-products',dependencies=[Depends(admin)])
+    def export_products():
+        with db.connect() as c:
+            rows=c.execute('SELECT barcode,name,price_cents,stock FROM products ORDER BY id').fetchall()
+        body=write_catalog(rows)
+        return Response(body,media_type='text/csv; charset=utf-8',
+                        headers={'Content-Disposition':'attachment; filename="openretail-products.csv"'})
 
     @app.get('/api/admin/orders',dependencies=[Depends(admin)])
     def admin_orders():
@@ -805,9 +816,26 @@ def create_app(settings:Settings|None=None)->FastAPI:
     @app.get('/api/admin/help-requests',dependencies=[Depends(admin)])
     def admin_help_requests():
         with db.connect() as c:
-            rows=[asdict(x) for x in c.execute('''SELECT id,session_id,order_id,message,created_at
+            rows=[asdict(x) for x in c.execute('''SELECT id,session_id,order_id,message,created_at,status
                                                   FROM help_requests ORDER BY id DESC LIMIT 50''')]
         return {'physical_door_opened':False,'payment_required_to_leave':False,'requests':rows}
+
+    @app.post('/api/admin/help-requests/{request_id}/status',dependencies=[Depends(admin)])
+    def update_help_status(request_id:int,payload:HelpStatus):
+        """Mark a help request seen or done. Never opens a door or collects payment."""
+        if payload.status not in ('ACKNOWLEDGED','RESOLVED'):
+            abort(422,'状态只能是 ACKNOWLEDGED 或 RESOLVED')
+        with db.tx() as c:
+            row=c.execute('SELECT id,status FROM help_requests WHERE id=?',(request_id,)).fetchone()
+            if not row:abort(404,'求助不存在')
+            if row['status']=='RESOLVED' and payload.status!='RESOLVED':
+                abort(409,'已处理的求助不能改回未处理')
+            outcome='IDEMPOTENT' if row['status']==payload.status else payload.status
+            if outcome!='IDEMPOTENT':
+                c.execute('UPDATE help_requests SET status=? WHERE id=?',(payload.status,request_id))
+                db.audit(c,'operator','HELP_'+payload.status,str(request_id))
+        return {'id':request_id,'status':payload.status,'outcome':outcome,
+                'physical_door_opened':False,'door_authorized':False,'payment_required_to_leave':False}
 
     @app.get('/api/admin/stock-movements',dependencies=[Depends(admin)])
     def stock_movements(limit:int=Query(default=100,ge=1,le=500)):
@@ -838,7 +866,8 @@ def create_app(settings:Settings|None=None)->FastAPI:
     @app.get('/api/admin/events',dependencies=[Depends(admin)])
     def admin_events():
         with db.connect() as c:
-            return {'door':[asdict(x) for x in c.execute('SELECT id,result,provider,detail,created_at FROM door_events ORDER BY id DESC LIMIT 40')],
+            return {'physical_door_opened':False,
+                    'door':[asdict(x) for x in c.execute('SELECT id,result,provider,detail,created_at FROM door_events ORDER BY id DESC LIMIT 40')],
                     'frigate':[asdict(x) for x in c.execute('SELECT * FROM incidents ORDER BY id DESC LIMIT 40')],
                     'audit':[asdict(x) for x in c.execute('SELECT actor,action,detail,created_at FROM audit_events ORDER BY id DESC LIMIT 40')]}
 

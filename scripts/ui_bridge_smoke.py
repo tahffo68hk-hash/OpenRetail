@@ -57,6 +57,10 @@ with TestClient(create_app(cfg)) as backend,sync_playwright() as pw:
  p.wait_for_function("!document.querySelector('#admin-body').hidden")
  print('admin:',p.locator('#m-orders').inner_text(),'real:',p.locator('#m-real').inner_text(),'errors:',errors)
  p.wait_for_function("document.querySelector('#help-list').textContent.includes('请到货架帮忙')")
+ p.wait_for_function("document.querySelector('#door-event-list').textContent.includes('SESSION_ISSUED')")
+ p.wait_for_function("document.querySelector('#door-lock-note').textContent.includes('physical_door_opened=false')")
+ p.locator('[data-help-status="ACKNOWLEDGED"]').click()
+ p.wait_for_function("document.querySelector('#help-list').textContent.includes('已确认')")
  p.wait_for_function("document.querySelector('#ledger-balance').textContent.includes('一致')")
  p.wait_for_function("document.querySelector('#m-sales').textContent.includes('¥')")
  assert p.locator('#m-real').inner_text()=='¥0.00'

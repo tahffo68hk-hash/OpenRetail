@@ -84,7 +84,8 @@ CREATE TABLE IF NOT EXISTS help_requests(
  session_id TEXT,
  order_id TEXT,
  message TEXT NOT NULL,
- created_at INTEGER NOT NULL
+ created_at INTEGER NOT NULL,
+ status TEXT NOT NULL DEFAULT 'OPEN' CHECK(status IN ('OPEN','ACKNOWLEDGED','RESOLVED'))
 );
 CREATE INDEX IF NOT EXISTS idx_orders_status_exp ON orders(status,expires_at);
 CREATE INDEX IF NOT EXISTS idx_orders_session ON orders(session_id,created_at);
@@ -137,6 +138,9 @@ class Database:
             if cols and 'reserved_stock' not in cols:c.execute('ALTER TABLE products ADD COLUMN reserved_stock INTEGER NOT NULL DEFAULT 0')
             cols={x['name'] for x in c.execute('PRAGMA table_info(guest_sessions)')}
             if cols and 'verified_identity_hash' not in cols:c.execute('ALTER TABLE guest_sessions ADD COLUMN verified_identity_hash TEXT')
+            help_cols={x['name'] for x in c.execute('PRAGMA table_info(help_requests)')}
+            if help_cols and 'status' not in help_cols:
+                c.execute("ALTER TABLE help_requests ADD COLUMN status TEXT NOT NULL DEFAULT 'OPEN'")
             cols={x['name'] for x in c.execute('PRAGMA table_info(orders)')}
             if cols and 'payment_reference' not in cols:c.execute('ALTER TABLE orders ADD COLUMN payment_reference TEXT')
             order_table=c.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='orders'").fetchone()

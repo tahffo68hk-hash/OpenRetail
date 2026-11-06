@@ -111,6 +111,21 @@ def test_help_request_does_not_open_a_door_or_require_payment(client,admin_heade
     after=client.get('/api/admin/events',headers=admin_header).json()['door']
     assert after==before
     assert client.get('/api/admin/help-requests').status_code==401
+    created=client.post('/api/help',json={'message':'需要购物袋'}).json()
+    doors=client.get('/api/admin/events',headers=admin_header).json()
+    assert doors['physical_door_opened'] is False
+    results={row['result'] for row in doors['door']}
+    assert 'SESSION_ISSUED' in results
+    ack=client.post(f"/api/admin/help-requests/{created['id']}/status",headers=admin_header,json={'status':'ACKNOWLEDGED'})
+    assert ack.status_code==200
+    assert ack.json()['outcome']=='ACKNOWLEDGED' and ack.json()['physical_door_opened'] is False
+    assert ack.json()['payment_required_to_leave'] is False and ack.json()['door_authorized'] is False
+    again=client.post(f"/api/admin/help-requests/{created['id']}/status",headers=admin_header,json={'status':'ACKNOWLEDGED'})
+    assert again.json()['outcome']=='IDEMPOTENT'
+    done=client.post(f"/api/admin/help-requests/{created['id']}/status",headers=admin_header,json={'status':'RESOLVED'})
+    assert done.json()['status']=='RESOLVED' and done.json()['physical_door_opened'] is False
+    assert client.post(f"/api/admin/help-requests/{created['id']}/status",headers=admin_header,json={'status':'ACKNOWLEDGED'}).status_code==409
+    assert client.get('/api/admin/events',headers=admin_header).json()['door']==doors['door']
 
 
 def test_virtual_entry_events_keep_the_physical_door_closed(client,admin_header):

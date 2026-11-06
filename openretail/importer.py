@@ -12,6 +12,16 @@ ALIASES={
  'stock':['quantity','stock','qty','库存','quantity_in_stock'],
 }
 class ImportErrorDetail(ValueError):pass
+EXPORT_COLUMNS=('barcode','name','price','stock')
+
+def write_catalog(rows)->str:
+    """Same columns the importer accepts. price is yuan, stock is the SQLite on-hand count."""
+    buf=io.StringIO()
+    writer=csv.writer(buf,lineterminator='\n')
+    writer.writerow(EXPORT_COLUMNS)
+    for row in rows:
+        writer.writerow([row['barcode'],row['name'],f"{row['price_cents']/100:.2f}",row['stock']])
+    return buf.getvalue()
 
 def parse_catalog(content:bytes):
     if len(content)>2_000_000:raise ImportErrorDetail('CSV exceeds 2 MB')

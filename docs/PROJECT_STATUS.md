@@ -4,6 +4,18 @@
 
 完全无人值守经营仍是 **NOT_APPROVED**。示例配置里的真实支付和实体开锁都是关闭的。
 
+## 本增量（商品 CSV、求助处理、虚拟进门列表）
+
+已在代码和测试里做到，并在本机复跑：
+
+- `GET /api/admin/export-products` 导出 `barcode,name,price,stock`。同一文件可以预览导入，预览不改库存。坏行整表拒绝，已有订单时确认导入仍返回 409，库存合计不变。权威仍是本库 SQLite。
+- 员工可以把求助标成 `ACKNOWLEDGED` 或 `RESOLVED`。重复标记是幂等的。已处理后不能改回确认。响应保持 `physical_door_opened=false`、`payment_required_to_leave=false`，门禁事件条数不变。
+- 管理页单独列出 `SESSION_ISSUED` 等虚拟进门记录，并写 `physical_door_opened=false`。没有新增开锁按钮。
+
+`/tmp/openretail-venv/bin/python -m pytest -q`（工作目录 `/workspace`，Python 3.12.3）：**48 passed，1 warning，4.64s，退出码 0**。警告仍是 Starlette 的 `httpx` TestClient 弃用提示。48 = 上一轮 46 + 本增量 2。
+
+`scripts/ui_bridge_smoke.py` 在去掉密钥环境变量后退出码 0：390 宽 `scrollWidth` 390；管理页出现 `SESSION_ISSUED` 和 `physical_door_opened=false`；求助被点成「已确认」；随后模拟退款仍显示「模拟退回」；`pageerror` 为空；1440 宽 `scrollWidth` 1440。导出按钮没有在这次浏览器脚本里点击，导出列由 pytest 核对。这仍不是真机，也不是微信退款。
+
 ## 本增量（管理端流水、模拟退款、顾客求助、示例库路径）
 
 已在代码和测试里做到，并在本机复跑：

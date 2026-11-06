@@ -80,6 +80,17 @@ def test_example_profiles_use_distinct_databases():
     assert staging.endswith('/staging/openretail.sqlite3')
     assert production.endswith('/production/openretail.sqlite3')
 
+def test_help_request_status_column_defaults_open(tmp_path):
+    path=tmp_path/'legacy-help.sqlite3'
+    with sqlite3.connect(path) as conn:
+        conn.execute('''CREATE TABLE help_requests(
+            id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, order_id TEXT,
+            message TEXT NOT NULL, created_at INTEGER NOT NULL)''')
+        conn.execute("INSERT INTO help_requests(message,created_at) VALUES('old',1)")
+    Database(str(path)).init(demo=False)
+    with sqlite3.connect(path) as conn:
+        assert conn.execute('SELECT status FROM help_requests').fetchone()[0]=='OPEN'
+
 def test_missing_secrets_fail_closed():
     with pytest.raises(RuntimeError,match='init_env'):
         Settings(admin_key='',integration_key='',app_secret='',app_mode='staging',mock_payments=False).validate()
