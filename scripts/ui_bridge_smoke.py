@@ -187,8 +187,13 @@ with TestClient(create_app(cfg)) as backend,sync_playwright() as pw:
  p.locator('#product-form input[name="name"]').fill('烟雾测试商品')
  p.locator('#product-form input[name="price"]').fill('3.50')
  p.locator('#product-form input[name="stock"]').fill('4')
- p.locator('#product-form button[type="submit"]').click()
+ p.evaluate("() => { const b=document.querySelector('#product-form button[type=\"submit\"]'); b.click(); b.click(); }")
  p.wait_for_function("document.querySelector('#product-status').textContent.includes('已新增')")
+ with backend.app.state.db.connect() as conn:
+  assert conn.execute('SELECT COUNT(*) n FROM products').fetchone()['n']==products_before+1
+  assert conn.execute("SELECT stock,name FROM products WHERE barcode='6900000099991'").fetchone()['stock']==4
+  assert conn.execute("SELECT COUNT(*) n FROM audit_events WHERE action='PRODUCT_CREATED' AND detail='6900000099991'").fetchone()['n']==1
+  assert conn.execute("SELECT COUNT(*) n FROM stock_movements WHERE reason='OPENING_BALANCE' AND reference='6900000099991'").fetchone()['n']==1
  p.wait_for_function("document.querySelector('#low-stock-list').textContent.includes('6900000099991') && document.querySelector('#low-stock-list').textContent.includes('预留')")
  p.locator('[data-find-product="6900000099991"]').click()
  p.wait_for_function("document.querySelector('#catalog-query').value==='6900000099991' && document.querySelector('#admin-catalog').textContent.includes('6900000099991') && document.querySelector('#admin-catalog').textContent.includes('预留')")

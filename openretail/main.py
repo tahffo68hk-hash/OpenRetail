@@ -252,6 +252,8 @@ def create_app(settings:Settings|None=None)->FastAPI:
     app.state.close_inflight=set()
     app.state.adjust_guard=threading.Lock()
     app.state.adjust_inflight=set()
+    app.state.create_guard=threading.Lock()
+    app.state.create_inflight=set()
 
     @app.middleware('http')
     async def security_headers(request:Request,call_next):
@@ -1207,16 +1209,28 @@ def create_app(settings:Settings|None=None)->FastAPI:
         name=payload.name.strip()
         if not name:abort(422,'请输入商品名称')
         price_cents=require_price_cents(payload.price_cents)
-        with db.tx() as c:
-            db.expire(c,now())
-            if c.execute('SELECT id FROM products WHERE barcode=?',(barcode,)).fetchone():
-                abort(409,'条码已存在。请只改名称售价，或做单品库存调整；不要整表覆盖。')
-            cur=c.execute('INSERT INTO products(barcode,name,price_cents,stock,active) VALUES(?,?,?,?,?)',
-                          (barcode,name,price_cents,payload.stock,int(payload.active)))
-            db.movement(c,cur.lastrowid,payload.stock,0,'OPENING_BALANCE',barcode)
-            db.audit(c,actor,'PRODUCT_CREATED',barcode)
-            row=c.execute('SELECT id,barcode,name,price_cents,stock,reserved_stock FROM products WHERE id=?',(cur.lastrowid,)).fetchone()
-        return {**asdict(row),'created':True,'system_of_record':'sqlite'}
+        with app.state.create_guard:
+            if barcode in app.state.create_inflight:
+                return {'barcode':barcode,'created':False,'duplicate':True,'system_of_record':'sqlite',
+                        'physical_door_opened':False,'identity_verified':False,'door_authorized':False}
+            app.state.create_inflight.add(barcode)
+        try:
+            hold=getattr(app.state,'hold_create',None)
+            if hold:hold()
+            with db.tx() as c:
+                db.expire(c,now())
+                if c.execute('SELECT id FROM products WHERE barcode=?',(barcode,)).fetchone():
+                    abort(409,'条码已存在。请只改名称售价，或做单品库存调整；不要整表覆盖。')
+                cur=c.execute('INSERT INTO products(barcode,name,price_cents,stock,active) VALUES(?,?,?,?,?)',
+                              (barcode,name,price_cents,payload.stock,int(payload.active)))
+                db.movement(c,cur.lastrowid,payload.stock,0,'OPENING_BALANCE',barcode)
+                db.audit(c,actor,'PRODUCT_CREATED',barcode)
+                row=c.execute('SELECT id,barcode,name,price_cents,stock,reserved_stock FROM products WHERE id=?',(cur.lastrowid,)).fetchone()
+            return {**asdict(row),'created':True,'duplicate':False,'system_of_record':'sqlite',
+                    'physical_door_opened':False,'identity_verified':False,'door_authorized':False}
+        finally:
+            with app.state.create_guard:
+                app.state.create_inflight.discard(barcode)
 
     @app.patch('/api/admin/products/{product_id}')
     def edit_product(product_id:int,payload:ProductEdit, actor:str=Depends(admin)):
