@@ -50,6 +50,9 @@ class ProductInput(BaseModel):
     price_cents:int=Field(ge=1,le=100_000_000)
     stock:int=Field(ge=0,le=1_000_000)
     active:bool=True
+class ProductEdit(BaseModel):
+    name:str=Field(min_length=1,max_length=120)
+    price_cents:int=Field(ge=1,le=100_000_000)
 
 class ModeInput(BaseModel):mode:str
 class FakePayment(BaseModel):order_id:str
@@ -745,34 +748,49 @@ def create_app(settings:Settings|None=None)->FastAPI:
         with db.connect() as c:return [asdict(r) for r in c.execute('SELECT * FROM products ORDER BY id')]
 
     @app.post('/api/admin/products',dependencies=[Depends(admin)])
-    def upsert_product(payload:ProductInput):
+    def create_product(payload:ProductInput):
+        """Add one SQLite catalog row. Duplicate barcodes are not an overwrite."""
         with db.tx() as c:
             db.expire(c,now())
-            existing=c.execute('SELECT id,stock,reserved_stock FROM products WHERE barcode=?',(payload.barcode,)).fetchone()
-            if existing:
-                if payload.stock<existing['reserved_stock']:abort(409,'库存低于已预留数量')
-                c.execute('UPDATE products SET name=?,price_cents=?,stock=?,active=? WHERE id=?',
-                          (payload.name,payload.price_cents,payload.stock,int(payload.active),existing['id']))
-                if payload.stock!=existing['stock']:
-                    db.movement(c,existing['id'],payload.stock-existing['stock'],0,'ADMIN_STOCK_SET',payload.barcode)
-            else:
-                cur=c.execute('INSERT INTO products(barcode,name,price_cents,stock,active) VALUES(?,?,?,?,?)',
-                              (payload.barcode,payload.name,payload.price_cents,payload.stock,int(payload.active)))
-                db.movement(c,cur.lastrowid,payload.stock,0,'ADMIN_PRODUCT_CREATED',payload.barcode)
-            db.audit(c,'operator','PRODUCT_UPSERT',payload.barcode)
-        return {'ok':True}
+            if c.execute('SELECT id FROM products WHERE barcode=?',(payload.barcode,)).fetchone():
+                abort(409,'条码已存在。请只改名称售价，或做单品库存调整；不要整表覆盖。')
+            cur=c.execute('INSERT INTO products(barcode,name,price_cents,stock,active) VALUES(?,?,?,?,?)',
+                          (payload.barcode,payload.name,payload.price_cents,payload.stock,int(payload.active)))
+            db.movement(c,cur.lastrowid,payload.stock,0,'OPENING_BALANCE',payload.barcode)
+            db.audit(c,'operator','PRODUCT_CREATED',payload.barcode)
+            row=c.execute('SELECT id,barcode,name,price_cents,stock,reserved_stock FROM products WHERE id=?',(cur.lastrowid,)).fetchone()
+        return {**asdict(row),'created':True,'system_of_record':'sqlite'}
+
+    @app.patch('/api/admin/products/{product_id}',dependencies=[Depends(admin)])
+    def edit_product(product_id:int,payload:ProductEdit):
+        """Name and price only. Stock and reservations stay untouched."""
+        with db.tx() as c:
+            current=c.execute('SELECT id,barcode,stock,reserved_stock FROM products WHERE id=?',(product_id,)).fetchone()
+            if not current:abort(404,'商品不存在')
+            c.execute('UPDATE products SET name=?,price_cents=? WHERE id=?',
+                      (payload.name,payload.price_cents,product_id))
+            db.audit(c,'operator','PRODUCT_EDIT',current['barcode'])
+            after=c.execute('SELECT stock,reserved_stock FROM products WHERE id=?',(product_id,)).fetchone()
+            if after['stock']!=current['stock'] or after['reserved_stock']!=current['reserved_stock']:
+                raise RuntimeError('name/price edit changed stock')
+        return {'id':product_id,'barcode':current['barcode'],'name':payload.name,'price_cents':payload.price_cents,
+                'stock':current['stock'],'reserved_stock':current['reserved_stock'],'stock_changed':False}
 
     @app.post('/api/admin/products/{product_id}/adjust-stock',dependencies=[Depends(admin)])
     def adjust_stock(product_id:int,payload:StockChange):
+        if payload.quantity_delta==0:abort(422,'调整数量不能为 0')
         with db.tx() as c:
             p=c.execute('SELECT * FROM products WHERE id=?',(product_id,)).fetchone()
             if not p:abort(404,'商品不存在')
             new=p['stock']+payload.quantity_delta
-            if new<0 or new<p['reserved_stock']:abort(409,'库存调整会侵占未结算预留库存')
+            # On-hand floor is the quantity already reserved for unpaid orders, and never below zero.
+            if new<0 or new<p['reserved_stock']:
+                abort(409,'库存调整会低于可售底线或侵占未结算预留')
             c.execute('UPDATE products SET stock=? WHERE id=?',(new,product_id))
             db.movement(c,product_id,payload.quantity_delta,0,payload.reason,'MANUAL')
             db.audit(c,'operator','STOCK_ADJUST',f'{product_id}:{payload.quantity_delta}')
-        return {'product_id':product_id,'stock':new,'reserved_stock':p['reserved_stock']}
+        return {'product_id':product_id,'stock':new,'reserved_stock':p['reserved_stock'],
+                'reason':payload.reason,'system_of_record':'sqlite'}
 
     @app.post('/api/admin/import-products',dependencies=[Depends(admin)])
     async def import_products(file:UploadFile=File(...),dry_run:bool=Query(True)):

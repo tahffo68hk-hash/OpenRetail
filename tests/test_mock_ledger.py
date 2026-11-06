@@ -137,7 +137,8 @@ def test_ledger_tracks_race_cancel_pay_and_refund(client, admin_header):
 
     balanced()
     product=client.get('/api/products').json()[0]
-    assert client.post('/api/admin/products', headers=admin_header, json={**product, 'stock':1}).status_code==200
+    assert client.post('/api/admin/products/'+str(product['id'])+'/adjust-stock', headers=admin_header,
+        json={'quantity_delta':1-product['stock'],'reason':'count correction'}).status_code==200
     first, second=visitor(client), visitor(client)
 
     def reserve(item):
@@ -155,7 +156,8 @@ def test_ledger_tracks_race_cancel_pay_and_refund(client, admin_header):
     assert client.get('/api/products').json()[0]['stock']==0
     balanced()
 
-    assert client.post('/api/admin/products', headers=admin_header, json={**product, 'stock':5}).status_code==200
+    assert client.post('/api/admin/products/'+str(product['id'])+'/adjust-stock', headers=admin_header,
+        json={'quantity_delta':5,'reason':'count correction'}).status_code==200
     auth, _, cancelled=place(client, 2, 'ledger-cancel-order-01')
     assert client.post('/api/orders/'+cancelled['id']+'/cancel', headers=auth).json()['status']=='CANCELLED'
     assert client.get('/api/products').json()[0]['stock']==5

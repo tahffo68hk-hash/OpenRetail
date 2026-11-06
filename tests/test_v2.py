@@ -62,10 +62,13 @@ def test_reservation_expiry_cancel_movement(client,admin_header):
 def test_reservation_prevents_oversell_during_admin_update(client,admin_header):
     a=visitor(client)
     p=client.get('/api/products').json()[0]
-    assert client.post('/api/admin/products',headers=admin_header,json={**p,'stock':2}).status_code==200
+    assert client.post('/api/admin/products/'+str(p['id'])+'/adjust-stock',headers=admin_header,
+        json={'quantity_delta':2-p['stock'],'reason':'count correction'}).status_code==200
     o=client.post('/api/orders',headers=a,json={'request_id':'last-stock-test-1',
         'lines':[{'product_id':p['id'],'quantity':2}]}).json()
-    assert client.post('/api/admin/products',headers=admin_header,json={**p,'stock':1}).status_code==409
+    edited=client.patch('/api/admin/products/'+str(p['id']),headers=admin_header,
+        json={'name':p['name'],'price_cents':p['price_cents']})
+    assert edited.status_code==200 and edited.json()['stock']==2 and edited.json()['stock_changed'] is False
     assert client.post('/api/admin/products/'+str(p['id'])+'/adjust-stock',headers=admin_header,
         json={'quantity_delta':-1,'reason':'physical damage'}).status_code==409
     assert client.post('/api/payments/mock-confirm',headers=a,json={'order_id':o['id']}).json()['status']=='PAID'
