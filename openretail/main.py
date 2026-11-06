@@ -442,6 +442,7 @@ def create_app(settings:Settings|None=None)->FastAPI:
                       (sid,digest(token),ts,ts+3600,None))
             record_virtual_door(c,sid,'CHECKOUT_SESSION','NOT A DOOR GRANT')
             db.audit(c,'visitor','STAFFED_CHECKOUT_CREATED',sid[:12])
+            db.audit(c,'visitor','INVITE_REDEEMED',f'session={sid[:12]};identity_verified=false;door_authorized=false')
         return {'guest_token':token,'session_id':sid,'expires_at':ts+3600,
                 'identity_verified':False,'door_authorized':False,'physical_door_opened':False,
                 'payment_required_to_leave':False,'virtual_event':'CHECKOUT_SESSION'}

@@ -4,6 +4,18 @@
 
 完全无人值守经营仍是 **NOT_APPROVED**。示例配置里的真实支付和实体开锁都是关闭的。
 
+## 本增量（领取邀请码写入操作记录）
+
+已在代码和测试里做到，并在本机复跑：
+
+- 成功领取结账邀请码追加 `INVITE_REDEEMED`。内容是新会话编号前 12 位，以及 identity_verified=false、door_authorized=false。不记录邀请码本身。创建邀请码仍是 `INVITE_CREATED`，只记 120 秒，也不记码。
+- 再用返回「邀请码已使用」，过期返回「邀请码已过期」。这两种都不新建会话，也不把码写进操作记录。领取不改库存，响应里 physical_door_opened、door_authorized、identity_verified 仍是 false。
+- 演示「生成访客会话」不写 `INVITE_REDEEMED`。
+
+`/tmp/openretail-venv/bin/python -m pytest -q`（工作目录 `/workspace`，Python 3.12.3）：**74 passed，1 warning，7.71s，退出码 0**。警告仍是 Starlette 的 `httpx` TestClient 弃用提示。74 = 上一轮 73 + 本增量 1。
+
+`scripts/ui_bridge_smoke.py` 在去掉密钥环境变量后退出码 0。顾客没有领取邀请码，仍用「生成访客会话」完成 ¥2.00 模拟支付，并含「模拟支付成功 · 非真实资金 · 已扣库存」。管理页仍可创建邀请码。390 宽 `scrollWidth` 390，1440 宽 `scrollWidth` 1440，`pageerror` 为空。这仍是 Chrome 到 TestClient 的桥，不是真机，也不是真实收款。
+
 ## 本增量（扫码后准备下一枪）
 
 已在代码和测试里做到，并在本机复跑：

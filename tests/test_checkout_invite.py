@@ -75,3 +75,45 @@ def test_non_demo_anonymous_entry_asks_for_an_invite(tmp_path):
         assert denied.status_code==503
         assert denied.json()['detail']=='请向店员领取结账邀请码后再结账。这不是身份核验，也不会开门。'
         assert pilot.post('/api/admin/checkout-invite').status_code==401
+
+
+def test_redeem_audits_without_storing_the_code_or_moving_stock(client, admin_header):
+    product=client.get('/api/products').json()[0]
+    with client.app.state.db.connect() as conn:
+        stock=conn.execute('SELECT stock,reserved_stock FROM products WHERE id=?',(product['id'],)).fetchone()
+        moves=conn.execute('SELECT COUNT(*) n FROM stock_movements').fetchone()['n']
+    created=client.post('/api/admin/checkout-invite',headers=admin_header).json()
+    code=created['invite']
+    redeemed=client.post('/api/entry/redeem',json={'invite':code})
+    assert redeemed.status_code==200
+    body=redeemed.json()
+    assert body['identity_verified'] is False and body['door_authorized'] is False
+    assert body['physical_door_opened'] is False and body['payment_required_to_leave'] is False
+    audit=client.get('/api/admin/audit',headers=admin_header).json()
+    rows=[row for row in audit['events'] if row['action']=='INVITE_REDEEMED']
+    assert len(rows)==1
+    assert code not in rows[0]['detail'] and code not in rows[0]['actor']
+    assert body['session_id'][:12] in rows[0]['detail']
+    assert 'identity_verified=false' in rows[0]['detail'] and 'door_authorized=false' in rows[0]['detail']
+    created_rows=[row for row in audit['events'] if row['action']=='INVITE_CREATED']
+    assert created_rows and code not in created_rows[0]['detail']
+    reused=client.post('/api/entry/redeem',json={'invite':code})
+    assert reused.status_code==401 and reused.json()['detail']=='邀请码已使用'
+    again=[row for row in client.get('/api/admin/audit',headers=admin_header).json()['events'] if row['action']=='INVITE_REDEEMED']
+    assert len(again)==1 and all(code not in row['detail'] for row in again)
+    fresh=client.post('/api/admin/checkout-invite',headers=admin_header).json()
+    with client.app.state.db.tx() as conn:
+        conn.execute('UPDATE checkout_invites SET expires_at=0 WHERE invite_hash=?',(digest(fresh['invite']),))
+    expired=client.post('/api/entry/redeem',json={'invite':fresh['invite']})
+    assert expired.status_code==401 and expired.json()['detail']=='邀请码已过期'
+    logged=client.get('/api/admin/audit',headers=admin_header).json()['events']
+    assert all(fresh['invite'] not in row['detail'] and code not in row['detail'] for row in logged)
+    before=sum(1 for row in logged if row['action']=='INVITE_REDEEMED')
+    direct=client.post('/api/entry')
+    assert direct.status_code==200
+    after=client.get('/api/admin/audit',headers=admin_header).json()['events']
+    assert sum(1 for row in after if row['action']=='INVITE_REDEEMED')==before
+    with client.app.state.db.connect() as conn:
+        now=conn.execute('SELECT stock,reserved_stock FROM products WHERE id=?',(product['id'],)).fetchone()
+        assert now['stock']==stock['stock'] and now['reserved_stock']==stock['reserved_stock']
+        assert conn.execute('SELECT COUNT(*) n FROM stock_movements').fetchone()['n']==moves
