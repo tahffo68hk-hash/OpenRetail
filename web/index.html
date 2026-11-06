@@ -26,14 +26,14 @@
       <div class="step-grid">
         <article class="step-card"><div class="step-head"><span class="step-number">01</span><b>访客入店</b></div><p>演示可直接创建会话；实景试点需员工提供一次性结账二维码，不能用于开门。</p><button id="entry-btn" class="btn primary">生成访客会话</button><button id="door-btn" class="btn secondary" disabled>模拟扫码开门</button>
           <div class="invite-redeem"><input id="invite-token" placeholder="员工签发的一次性结账邀请码（试点）" autocomplete="off">
-          <button id="redeem-btn" class="btn secondary">领取结账会话</button></div><div id="entry-result" class="inline-note">尚未创建访客会话</div></article>
+          <button id="redeem-btn" class="btn secondary">领取结账会话</button></div><div id="entry-result" class="inline-note">尚未创建访客会话</div><div id="entry-status" class="inline-note">实体门未打开 · 尚未记录虚拟进门事件</div></article>
         <article class="step-card"><div class="step-head"><span class="step-number">02</span><b>扫描商品</b></div><p>输入条码或使用 USB 扫码枪；支持的浏览器也可用摄像头扫码。</p><form id="scan-form" class="scan-input"><input id="barcode" placeholder="请输入商品条码" autocomplete="off" required><button class="btn secondary" type="submit">加入购物车</button></form><button id="camera-btn" class="text-button" type="button">尝试摄像头识别</button><video id="scanner-video" playsinline muted hidden></video><div id="scan-hint" class="inline-note">扫描设备可模拟键盘输入</div></article>
         <article class="step-card"><div class="step-head"><span class="step-number">03</span><b>确认支付</b></div><p>下单先预留库存，演示交易扣库存；真实试点需配置官方微信商户收款。</p><button id="checkout-btn" class="btn primary" disabled>创建订单</button><button id="pay-btn" class="btn secondary" disabled>模拟确认付款</button><button id="cancel-order-btn" class="btn secondary" disabled>取消未付款订单</button>
-          <img id="payment-qr" class="qr-code" alt="微信支付收款二维码，仅配置商户后显示" hidden><div id="payment-result" class="inline-note">尚未创建订单</div></article>
+          <img id="payment-qr" class="qr-code" alt="微信支付收款二维码，仅配置商户后显示" hidden><div id="payment-result" class="inline-note pay-banner">尚未创建订单</div></article>
       </div>
       <div class="shop-grid">
         <article class="surface"><div class="surface-heading"><div><h2>商品货架</h2><p>演示商品由本地数据库提供</p></div><span class="pill">订单预留库存 · 原子结算</span></div><div id="catalog" class="catalog"><p class="muted">加载商品中…</p></div></article>
-        <article class="surface cart-surface"><div class="surface-heading"><div><h2>购物车</h2><p>商品信息由服务端重新定价</p></div><span id="cart-count" class="count">0件</span></div><div id="cart" class="cart-empty">购物车为空，先从货架添加商品。</div><div class="cart-total"><div>预计金额 <small>（演示交易）</small></div><strong id="cart-total">¥0.00</strong></div></article>
+        <article class="surface cart-surface"><div class="surface-heading"><div><h2>购物车</h2><p>商品信息由服务端重新定价</p></div><span id="cart-count" class="count">0件</span></div><div id="cart" class="cart-empty">购物车为空，先从货架添加商品。</div><div class="cart-total"><div>预计金额 <small>（演示交易）</small></div><strong id="cart-total">¥0.00</strong></div><div class="cart-actions"><button id="cart-pay" class="btn primary" type="button" disabled>模拟结算（非真实扣款）</button></div><h2 class="history-title">本会话订单</h2><div id="my-orders" class="order-history"><p class="muted">还没有订单</p></div></article>
       </div>
     </section>
 

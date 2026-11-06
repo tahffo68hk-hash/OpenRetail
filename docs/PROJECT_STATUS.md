@@ -4,6 +4,18 @@
 
 完全无人值守经营仍是 **NOT_APPROVED**。示例配置里的真实支付和实体开锁都是关闭的。
 
+## 本增量（顾客界面、演示启动、虚拟门事件）
+
+已在代码和测试里做到，并在本机复跑：
+
+- 导入 `openretail.main` 不再立刻 `create_app()`。干净进程里演示档可以不带密钥完成导入；真正创建应用时，缺的演示密钥只生成在内存中，并把一次性 `ADMIN_KEY` 打到标准错误，不写磁盘。`APP_MODE=staging` 且没有配置时，访问 `app` 仍会失败。`LIVE_DOOR_ENABLED=true` 仍拒绝启动。
+- 顾客页显示未付款、已超时、模拟支付成功（非真实扣款）和 `real_money=false`。购物车有一步「模拟结算」。没有顾客自助退款按钮。
+- 演示进店写入 `SESSION_ISSUED`，员工邀请兑换写入 `CHECKOUT_SESSION`，模拟开门仍是 `SIMULATED`。这些记录的 `physical_door_opened` 都是 false。
+
+`scripts/ui_bridge_smoke.py` 在去掉 `ADMIN_KEY`、`INTEGRATION_KEY`、`APP_SECRET` 后退出码 0：8 个商品；390 宽 `scrollWidth` 为 390；未付款文案含订单金额；支付文案为「模拟支付成功 · 非真实扣款」；订单列表含 `real_money=false`；进门状态含「实体门未打开」；`pageerror` 为空；1440 宽 `scrollWidth` 为 1440。这仍是 Chrome 到 TestClient 的桥，不是真机。
+
+随后的 pytest（`/tmp/openretail-venv/bin/python -m pytest -q`，工作目录 `/workspace`，Python 3.12.3）：**44 passed，1 warning，4.29s，退出码 0**。警告仍是 Starlette 的 `httpx` TestClient 弃用提示。44 = 上一轮 41 + 本增量 3（`tests/test_customer_ux.py`）。下面保留的 41 是更早一次运行，不是当前总数。
+
 ## 店主决定（2026-11-06）
 
 库存系统权威是本仓库的 SQLite。这是已决定的事实，不是建议。OSPOS 与 ERPNext 不得作为第二套权威去扣减同一库存。OSPOS 以后只可再评估为可选适配器。详见 `DECISIONS.md`。
@@ -81,6 +93,6 @@ python3 -m venv /tmp/openretail-venv
 ## 下一步（尚未做到）
 
 1. 真实微信仍未联调。官方域名还是 `api.mch.weixin.qq.com`。本地 `MockTransport` 和 `mock:` 沙箱都不是微信沙箱验收。真实退款和日终账单仍没有。
-2. 让 `scripts/ui_bridge_smoke.py` 在导入应用之前自行准备演示环境。页面还没有模拟退款按钮；退款目前只在 API 测试里验证过。
+2. 顾客页仍然没有模拟退款按钮；退款仍只在管理端 API。桥接脚本已能在干净环境导入，但不是公网或真机验收。
 3. 有人值守试点前先过 `PRODUCTION_GATE.md` 的 A 节。无人值守保持关闭。
 4. 店内运行放在本地机器上。这台开发用云端虚拟机不是门店运行时。

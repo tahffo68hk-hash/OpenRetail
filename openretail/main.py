@@ -5,6 +5,7 @@ Physical door control and unverified guest access fail closed. External money is
 allowed only with separately configured WeChat Native merchant credentials.
 """
 import hashlib
+import sys
 import base64
 import io
 import qrcode
@@ -70,6 +71,9 @@ class StockChange(BaseModel):
 def create_app(settings:Settings|None=None)->FastAPI:
     cfg=settings or Settings()
     cfg.validate()
+    if getattr(cfg,'demo_secrets_generated',False):
+        print('OpenRetail demo: ephemeral ADMIN_KEY for this process only (not written to disk). '
+              'Run scripts/init_env.py to persist secrets. ADMIN_KEY='+cfg.admin_key, file=sys.stderr)
     db=Database(cfg.db_path)
     db.init(demo=cfg.demo)
     ha=HomeAssistantAdapter(cfg)
@@ -133,13 +137,39 @@ def create_app(settings:Settings|None=None)->FastAPI:
         if not row or row['expires_at']<=now():abort(401,'访客会话已失效')
         return row['id']
 
+    def payment_facts(c,order_id,status):
+        pay=c.execute('SELECT provider,verified FROM payments WHERE order_id=?',(order_id,)).fetchone()
+        verified=int(pay['verified']) if pay else 0
+        provider=pay['provider'] if pay else ''
+        if status=='PAID' and provider=='MOCK_NOT_REAL_MONEY':kind='MOCK_NOT_REAL_MONEY'
+        elif status=='PAID' and provider=='WECHAT_NATIVE' and verified==1:kind='WECHAT_NATIVE'
+        elif status=='REFUNDED':kind='MOCK_REFUND' if provider=='MOCK_NOT_REAL_MONEY' else 'REFUNDED'
+        elif status=='EXPIRED':kind='TIMEOUT_UNPAID'
+        elif status=='CANCELLED':kind='CANCELLED_UNPAID'
+        elif status in ('PENDING','PAYMENT_PENDING'):kind='UNPAID'
+        else:kind='REVIEW'
+        return {'payment_kind':kind,'verified':verified,'real_money':kind=='WECHAT_NATIVE' and verified==1}
+
     def row_order(c,order_id):
         row=c.execute('SELECT * FROM orders WHERE id=?',(order_id,)).fetchone()
         if row is None:abort(404,'订单不存在')
         lines=[asdict(r) for r in c.execute(
             'SELECT product_id,barcode,name,unit_price_cents,quantity FROM order_lines WHERE order_id=?',
             (order_id,))]
-        return {**asdict(row),'lines':lines}
+        return {**asdict(row),'lines':lines,**payment_facts(c,order_id,row['status'])}
+
+    def record_virtual_door(c,session_id,result,detail):
+        c.execute('''INSERT INTO door_events(session_id,result,provider,detail,created_at)
+                     VALUES(?,?,?,?,?)''',(session_id,result,'LOCAL_SIMULATOR',detail,now()))
+
+    def entry_status(c,session_id):
+        row=c.execute('SELECT expires_at FROM guest_sessions WHERE id=?',(session_id,)).fetchone()
+        events=[asdict(r) for r in c.execute(
+            '''SELECT id,result,provider,detail,created_at FROM door_events
+               WHERE session_id=? ORDER BY id DESC LIMIT 20''',(session_id,))]
+        return {'session_id':session_id,'expires_at':row['expires_at'] if row else None,
+                'identity_verified':False,'door_authorized':False,'physical_door_opened':False,
+                'virtual_only':True,'events':events}
 
     def order_owned(c,order_id,session_id):
         row=c.execute('SELECT * FROM orders WHERE id=? AND session_id=?',(order_id,session_id)).fetchone()
@@ -227,8 +257,10 @@ def create_app(settings:Settings|None=None)->FastAPI:
         with db.tx() as c:
             c.execute('INSERT INTO guest_sessions(id,token_hash,created_at,expires_at) VALUES(?,?,?,?)',
                       (sid,digest(token),ts,ts+7200))
+            record_virtual_door(c,sid,'SESSION_ISSUED','NO PHYSICAL UNLOCK')
             db.audit(c,'visitor','DEMO_SESSION_CREATE',sid[:12])
-        return {'guest_token':token,'session_id':sid,'expires_at':ts+7200,'identity_verified':False}
+        return {'guest_token':token,'session_id':sid,'expires_at':ts+7200,'identity_verified':False,
+                'door_authorized':False,'physical_door_opened':False,'virtual_event':'SESSION_ISSUED'}
 
     def qr_image_data(value:str)->str:
         img=qrcode.make(value,box_size=7,border=3)
@@ -263,9 +295,11 @@ def create_app(settings:Settings|None=None)->FastAPI:
             if cur.rowcount!=1:abort(401,'邀请码无效、过期或已使用')
             c.execute('INSERT INTO guest_sessions(id,token_hash,created_at,expires_at,verified_identity_hash) VALUES(?,?,?,?,?)',
                       (sid,digest(token),ts,ts+3600,None))
+            record_virtual_door(c,sid,'CHECKOUT_SESSION','NOT A DOOR GRANT')
             db.audit(c,'visitor','STAFFED_CHECKOUT_CREATED',sid[:12])
         return {'guest_token':token,'session_id':sid,'expires_at':ts+3600,
-                'identity_verified':False,'door_authorized':False}
+                'identity_verified':False,'door_authorized':False,'physical_door_opened':False,
+                'virtual_event':'CHECKOUT_SESSION'}
 
     @app.post('/api/door/open')
     def door_open(sid:str=Depends(guest)):
@@ -273,11 +307,24 @@ def create_app(settings:Settings|None=None)->FastAPI:
         with db.tx() as c:
             mode=c.execute("SELECT value FROM store_settings WHERE key='mode'").fetchone()['value']
             if mode!='UNATTENDED':abort(409,'当前非无人值守演示模式')
-            c.execute('INSERT INTO door_events(session_id,result,provider,detail,created_at) VALUES(?,?,?,?,?)',
-                      (sid,'SIMULATED','LOCAL_SIMULATOR','NO PHYSICAL UNLOCK',now()))
+            record_virtual_door(c,sid,'SIMULATED','NO PHYSICAL UNLOCK')
             db.audit(c,'visitor','DEMO_ENTRY_OPEN',sid[:12])
+            status=entry_status(c,sid)
         return {'result':'SIMULATED','physical_door_opened':False,
-                'note':'只有模拟事件；安全疏散不能依赖支付状态'}
+                'note':'只有模拟事件；安全疏散不能依赖支付状态',**status}
+
+    @app.get('/api/entry/status')
+    def read_entry_status(sid:str=Depends(guest)):
+        with db.connect() as c:
+            return entry_status(c,sid)
+
+    @app.get('/api/orders')
+    def my_orders(sid:str=Depends(guest)):
+        with db.tx() as c:
+            db.expire(c,now())
+            ids=[r['id'] for r in c.execute(
+                'SELECT id FROM orders WHERE session_id=? ORDER BY created_at DESC LIMIT 30',(sid,))]
+            return [row_order(c,oid) for oid in ids]
 
     @app.post('/api/orders',status_code=201)
     def create_order(payload:NewOrder,sid:str=Depends(guest)):
@@ -779,4 +826,11 @@ def create_app(settings:Settings|None=None)->FastAPI:
     def index():return FileResponse(ROOT/'web/index.html')
     return app
 
-app=create_app()
+def __getattr__(name):
+    # Importing create_app must not boot a database or demand secrets.
+    # uvicorn openretail.main:app still receives a real app on first access.
+    if name=='app':
+        instance=create_app()
+        globals()['app']=instance
+        return instance
+    raise AttributeError(name)

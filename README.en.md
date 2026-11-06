@@ -146,4 +146,4 @@ pip install -r requirements-ui.txt
 python scripts/ui_bridge_smoke.py
 ```
 
-The script renders the real HTML, CSS, and JavaScript in Chromium and bridges HTTP calls to the FastAPI TestClient. It is for offline UI regression. It does not replace a real domain, HTTPS, a phone browser, or a payment-terminal acceptance test.
+The script renders the real HTML, CSS, and JavaScript in Chromium and bridges HTTP calls to the FastAPI TestClient. It is for offline UI regression. It does not replace a real domain, HTTPS, a phone browser, or a payment-terminal acceptance test. A clean tree can run it: importing the app does not require secrets first. If demo mode is started with uvicorn and no `.env`, the process generates an in-memory `ADMIN_KEY` and prints it to stderr. It is not written to disk. Staging and production still refuse to boot without their required configuration.

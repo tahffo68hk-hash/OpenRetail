@@ -68,7 +68,7 @@ def test_restore_is_isolated_and_consistent(tmp_path,monkeypatch):
 
 def test_missing_secrets_fail_closed():
     with pytest.raises(RuntimeError,match='init_env'):
-        Settings(admin_key='',integration_key='',app_secret='',app_mode='demo',mock_payments=True).validate()
+        Settings(admin_key='',integration_key='',app_secret='',app_mode='staging',mock_payments=False).validate()
 
 def test_database_directory_path_is_rejected(tmp_path):
     cfg=Settings(db_path=str(tmp_path),app_mode='demo',mock_payments=True,**KEYS)

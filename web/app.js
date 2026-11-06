@@ -14,47 +14,63 @@ async function api(path,{method='GET',body,admin=false,guest=false,form=false}={
  if(!res.ok)throw Error(typeof data.detail==='string'?data.detail:JSON.stringify(data.detail||data));
  return data;
 }
-async function store(){const s=await api('/api/public/store');state.paymentProvider=s.payment;document.querySelector('.notice b').textContent=s.demo?'演示付款与模拟门禁':'有人值守试点 · 实体门禁仍关闭';document.querySelector('.notice p').textContent=s.demo?'不采集真实身份、不执行实际开锁、不进行真实扣款。':'顾客仅凭员工签发邀请码结账；实际付款需官方商户配置并以服务端验签结果为准。无人营业和实体门禁均未开放。';if(!s.demo){$('entry-btn').disabled=true;$('entry-btn').textContent='访客自助开户未开放';$('door-btn').disabled=true;$('pay-btn').textContent=s.payment==='WECHAT_NATIVE'?'生成微信收款二维码':'正式支付未配置';} $('top-mode').textContent=s.store_mode==='UNATTENDED'?'无人值守演示':'有人营业演示';$('shop-mode-chip').textContent=s.store_mode==='UNATTENDED'?'🌙 无人模式':'☀️ 有人模式';return s}
+async function store(){const s=await api('/api/public/store');state.paymentProvider=s.payment;document.querySelector('.notice b').textContent=s.demo?'演示付款与模拟门禁':'有人值守试点 · 实体门禁仍关闭';document.querySelector('.notice p').textContent=s.demo?'不采集真实身份、不执行实际开锁、不进行真实扣款。':'顾客仅凭员工签发邀请码结账；实际付款需官方商户配置并以服务端验签结果为准。无人营业和实体门禁均未开放。';if(!s.demo){$('entry-btn').disabled=true;$('entry-btn').textContent='访客自助开户未开放';$('door-btn').disabled=true;$('pay-btn').textContent=s.payment==='WECHAT_NATIVE'?'生成微信收款二维码':'正式支付未配置';$('cart-pay').textContent=s.payment==='WECHAT_NATIVE'?'生成收款码':'创建未付款订单'}else{$('cart-pay').textContent='模拟结算（非真实扣款）'} $('top-mode').textContent=s.store_mode==='UNATTENDED'?'无人值守演示':'有人营业演示';$('shop-mode-chip').textContent=s.store_mode==='UNATTENDED'?'🌙 无人模式':'☀️ 有人模式';return s}
 async function loadProducts(){state.products=await api('/api/products');renderProducts();renderCart()}
 const pict=['▣','◈','◉','▤','▥','◎','◇','▧'];
 function renderProducts(){$('catalog').innerHTML=state.products.map((p,i)=>`<div class="product-card"><div class="product-icon">${pict[i%pict.length]}</div><div class="product-info"><b title="${esc(p.name)}">${esc(p.name)}</b><small>${esc(p.barcode)} · 可售 ${p.available_stock}</small><span class="price">${money(p.price_cents)}</span></div><button class="add-btn" data-add="${p.id}" ${p.available_stock<=0?'disabled':''} aria-label="添加 ${esc(p.name)}">+</button></div>`).join('')||'<p class="muted">没有商品</p>'}
 function add(pid){const p=state.products.find(x=>x.id===Number(pid));if(!p)return;const old=state.cart.get(p.id)||0;if(state.orderId){toast('已有待付款订单，请先完成付款或取消订单');return}if(old>=p.available_stock){toast('库存不足');return}state.cart.set(p.id,old+1);state.orderId='';$('pay-btn').disabled=true;renderCart()}
 function renderCart(){const items=[...state.cart.entries()];$('cart-count').textContent=items.reduce((sum,[,q])=>sum+q,0)+'件';const total=items.reduce((sum,[id,q])=>sum+(state.products.find(p=>p.id===id)?.price_cents||0)*q,0);$('cart-total').textContent=money(total);$('checkout-btn').disabled=!state.token||!items.length||!!state.orderId;
- $('cart').innerHTML=items.length?items.map(([id,qty])=>{const p=state.products.find(x=>x.id===id);return p?`<div class="cart-line"><div><b>${esc(p.name)}</b><small>${money(p.price_cents)} × ${qty}</small></div><div class="qty-tools"><button data-minus="${id}" aria-label="减少">−</button><span>${qty}</span><button data-add="${id}" aria-label="增加">+</button></div></div>`:''}).join(''):'<div class="cart-empty">购物车为空，先从货架添加商品。</div>'}
+ $('cart').innerHTML=items.length?items.map(([id,qty])=>{const p=state.products.find(x=>x.id===id);return p?`<div class="cart-line"><div><b>${esc(p.name)}</b><small>${money(p.price_cents)} × ${qty}</small></div><div class="qty-tools"><button data-minus="${id}" aria-label="减少">−</button><span>${qty}</span><button data-add="${id}" aria-label="增加">+</button></div></div>`:''}).join(''):'<div class="cart-empty">购物车为空，先从货架添加商品。</div>';if($('cart-pay'))$('cart-pay').disabled=!state.token||(!items.length&&!state.orderId)}
 function stopCamera(){if(state.scanTimer){clearInterval(state.scanTimer);state.scanTimer=null}if(state.scanner){state.scanner.getTracks().forEach(t=>t.stop());state.scanner=null}$('scanner-video').hidden=true}
 async function cameraScan(){if(state.scanner){stopCamera();$('camera-btn').textContent='尝试摄像头识别';return}if(!('BarcodeDetector'in window)||!navigator.mediaDevices?.getUserMedia){toast('此浏览器不支持 BarcodeDetector 或缺少安全 HTTPS 环境，请使用扫码枪或输入条码');return}
  try{const detector=new BarcodeDetector({formats:['ean_13','ean_8','code_128','upc_a']});const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});state.scanner=stream;const video=$('scanner-video');video.srcObject=stream;video.hidden=false;await video.play();$('camera-btn').textContent='关闭摄像头';state.scanTimer=setInterval(async()=>{if(video.readyState<2)return;try{const codes=await detector.detect(video);if(codes.length){$('barcode').value=codes[0].rawValue;stopCamera();$('camera-btn').textContent='尝试摄像头识别';tryScan()}}catch{}},600)}catch(e){stopCamera();toast('摄像头无法启动：'+e.message)}}
 function tryScan(){const code=$('barcode').value.trim();const p=state.products.find(p=>p.barcode===code);if(!p){toast('未找到条码：'+code);return}add(p.id);$('barcode').value='';toast('已添加 '+p.name)}
-async function adminRefresh(){if(!state.csrf)return;const [overview,orders,events]=await Promise.all([api('/api/admin/overview',{admin:true}),api('/api/admin/orders',{admin:true}),api('/api/admin/events',{admin:true})]);$('admin-body').hidden=false;$('m-orders').textContent=overview.paid_orders;$('m-sales').textContent=money(overview.simulated_revenue_cents);$('m-products').textContent=overview.products;$('m-entries').textContent=overview.door_events;$('mode-info').textContent='当前模式：'+(overview.mode==='UNATTENDED'?'无人值守':'有人经营')+'（实物门锁不受控制）';$('ha-state').textContent=overview.home_assistant.status;$('mode-staffed').classList.toggle('selected',overview.mode==='STAFFED');$('mode-unattended').classList.toggle('selected',overview.mode==='UNATTENDED');$('order-table').innerHTML=orders.map(o=>`<tr><td title="${esc(o.id)}">${esc(o.id.slice(0,12))}…</td><td><span class="status ${o.status==='PAID'?'paid':''}">${esc(o.status)}</span></td><td>${money(o.total_cents)}</td><td>${time(o.created_at)}</td></tr>`).join('')||'<tr><td colspan="4">暂无订单</td></tr>';const incident=events.frigate.map(e=>({name:'Frigate 人员事件 · '+e.camera+' · '+e.event_type,t:e.created_at})),doors=events.door.map(e=>({name:'扫码开门 · '+e.result,t:e.created_at}));$('event-list').innerHTML=[...incident,...doors].sort((a,b)=>b.t-a.t).slice(0,15).map(e=>`<div class="event"><span>${esc(e.name)}</span><time>${time(e.t)}</time></div>`).join('')||'<p class="muted">暂无设备事件</p>'}
+function describePayment(order){
+ if(!order||!order.status)return {text:'尚未创建订单',cls:''};
+ if(order.status==='PAID'&&order.payment_kind==='MOCK_NOT_REAL_MONEY')return {text:'模拟支付成功 · 非真实扣款 · 已扣库存 · '+money(order.total_cents),cls:'mock-paid'};
+ if(order.status==='PAID'&&order.real_money)return {text:'已验签付款 · '+money(order.total_cents),cls:'mock-paid'};
+ if(order.status==='EXPIRED')return {text:'已超时 · 未付款 · 预留已释放，请重新下单',cls:'timeout'};
+ if(order.status==='CANCELLED')return {text:'已取消 · 未付款 · 预留已释放',cls:'timeout'};
+ if(order.status==='REFUNDED')return {text:'演示库存已由店员退回',cls:''};
+ if(order.status==='PAYMENT_REVIEW')return {text:'待人工核对 · 请勿重复付款',cls:'timeout'};
+ if(order.status==='PENDING'||order.status==='PAYMENT_PENDING')return {text:'未付款 · 库存已预留 · 订单 '+(order.id||'').slice(0,10)+' · '+money(order.total_cents),cls:'unpaid'};
+ return {text:order.status,cls:''};
+}
+function showPay(order){const box=$('payment-result');const view=describePayment(order);box.textContent=view.text;box.className='inline-note pay-banner'+(view.cls?' '+view.cls:'')}
+async function refreshMine(){if(!state.token){$('my-orders').innerHTML='<p class="muted">还没有订单</p>';return}const rows=await api('/api/orders',{guest:true});$('my-orders').innerHTML=rows.length?rows.map(o=>{const view=describePayment(o);return `<article class="${esc(view.cls)}"><b>${esc(view.text.split('·')[0].trim())}</b><div>${money(o.total_cents)} · ${time(o.created_at)}</div><small>${esc(o.payment_kind)} · verified=${o.verified} · real_money=${o.real_money?'true':'false'}</small></article>`}).join(''):'<p class="muted">还没有订单</p>'}
+async function showEntryStatus(){const status=await api('/api/entry/status',{guest:true});const latest=status.events[0];$('entry-status').textContent='实体门未打开 · physical_door_opened=false · 虚拟事件 '+(latest?latest.result+' / '+latest.detail:'无')}
+async function createOrder(){if(!state.token)throw Error('先创建访客会话');const req={request_id:(crypto.randomUUID?.()||('demo-'+Date.now()+'-'+Math.random())),lines:[...state.cart].map(([product_id,quantity])=>({product_id,quantity}))};const r=await api('/api/orders',{method:'POST',body:req,guest:true});state.orderId=r.id;$('cancel-order-btn').disabled=false;$('pay-btn').disabled=state.paymentProvider==='DISABLED';$('payment-qr').hidden=true;showPay(r);await refreshMine();return r}
+async function confirmMock(){const r=await api('/api/payments/mock-confirm',{method:'POST',body:{order_id:state.orderId},guest:true});showPay(r);if(r.status==='PAID'){state.cart.clear();state.orderId='';$('cancel-order-btn').disabled=true;$('pay-btn').disabled=true;await loadProducts()}await refreshMine();return r}
+async function adminRefresh(){if(!state.csrf)return;const [overview,orders,events]=await Promise.all([api('/api/admin/overview',{admin:true}),api('/api/admin/orders',{admin:true}),api('/api/admin/events',{admin:true})]);$('admin-body').hidden=false;$('m-orders').textContent=overview.paid_orders;$('m-sales').textContent=money(overview.simulated_revenue_cents);$('m-products').textContent=overview.products;$('m-entries').textContent=overview.door_events;$('mode-info').textContent='当前模式：'+(overview.mode==='UNATTENDED'?'无人值守':'有人经营')+'（实物门锁不受控制）';$('ha-state').textContent=overview.home_assistant.status;$('mode-staffed').classList.toggle('selected',overview.mode==='STAFFED');$('mode-unattended').classList.toggle('selected',overview.mode==='UNATTENDED');$('order-table').innerHTML=orders.map(o=>`<tr><td title="${esc(o.id)}">${esc(o.id.slice(0,12))}…</td><td><span class="status ${o.status==='PAID'?'paid':''}">${esc(o.status)}</span></td><td>${money(o.total_cents)}</td><td>${time(o.created_at)}</td></tr>`).join('')||'<tr><td colspan="4">暂无订单</td></tr>';const incident=events.frigate.map(e=>({name:'Frigate 人员事件 · '+e.camera+' · '+e.event_type,t:e.created_at})),doors=events.door.map(e=>({name:'虚拟门禁 · '+e.result+' · '+e.detail,t:e.created_at}));$('event-list').innerHTML=[...incident,...doors].sort((a,b)=>b.t-a.t).slice(0,15).map(e=>`<div class="event"><span>${esc(e.name)}</span><time>${time(e.t)}</time></div>`).join('')||'<p class="muted">暂无设备事件</p>'}
 async function run(fn){try{await fn()}catch(e){toast(e.message);console.error(e)}}
 document.addEventListener('click',e=>{const nav=e.target.closest('[data-panel]');if(nav){document.querySelectorAll('.nav').forEach(n=>n.classList.toggle('active',n===nav));['shop','admin'].forEach(p=>$('panel-'+p).hidden=p!==nav.dataset.panel);$('current-title').textContent=nav.dataset.panel==='shop'?'顾客自助购物':'店主工作台';if(nav.dataset.panel==='admin')run(adminRefresh)}const addButton=e.target.closest('[data-add]');if(addButton)add(addButton.dataset.add);const minus=e.target.closest('[data-minus]');if(minus){if(state.orderId){toast('请先完成或取消当前订单');return}const id=Number(minus.dataset.minus);const q=(state.cart.get(id)||0)-1;if(q<=0)state.cart.delete(id);else state.cart.set(id,q);state.orderId='';$('pay-btn').disabled=true;renderCart()}});
-$('entry-btn').onclick=()=>run(async()=>{const s=await api('/api/entry',{method:'POST'});state.token=s.guest_token;sessionStorage.setItem('retail_guest',state.token);$('entry-result').textContent='访客会话创建成功（未进行身份核验）；有效期至 '+time(s.expires_at);$('door-btn').disabled=false;renderCart();toast('演示访客会话已创建')});
-$('door-btn').onclick=()=>run(async()=>{if(!state.token)throw Error('请先创建会话');const r=await api('/api/door/open',{method:'POST',guest:true});$('entry-result').textContent='开门结果：'+r.result+'。实际门锁未动作。';toast('仅模拟开门成功')});
+$('entry-btn').onclick=()=>run(async()=>{const s=await api('/api/entry',{method:'POST'});state.token=s.guest_token;sessionStorage.setItem('retail_guest',state.token);$('entry-result').textContent='访客会话创建成功（未进行身份核验）；有效期至 '+time(s.expires_at);$('door-btn').disabled=false;await showEntryStatus();renderCart();toast('演示访客会话已创建')});
+$('door-btn').onclick=()=>run(async()=>{if(!state.token)throw Error('请先创建会话');const r=await api('/api/door/open',{method:'POST',guest:true});if(r.physical_door_opened)throw Error('实体门状态异常');$('entry-result').textContent='开门结果：'+r.result+'。实际门锁未动作。';$('entry-status').textContent='实体门未打开 · physical_door_opened=false · 虚拟事件 '+(r.events||[]).map(e=>e.result).join('、');toast('仅模拟开门成功')});
 $('scan-form').onsubmit=e=>{e.preventDefault();tryScan()};$('camera-btn').onclick=()=>run(cameraScan);
-$('checkout-btn').onclick=()=>run(async()=>{if(!state.token)throw Error('先创建访客会话');$('checkout-btn').disabled=true;try{const req={request_id:(crypto.randomUUID?.()||('demo-'+Date.now()+'-'+Math.random())),lines:[...state.cart].map(([product_id,quantity])=>({product_id,quantity}))};const r=await api('/api/orders',{method:'POST',body:req,guest:true});state.orderId=r.id;$('cancel-order-btn').disabled=false;$('payment-result').textContent='订单 '+r.id.slice(0,10)+' · 服务端金额 '+money(r.total_cents)+' · 未付款';$('pay-btn').disabled=state.paymentProvider==='DISABLED';$('payment-qr').hidden=true;toast('订单已预留库存，等待支付确认')}finally{renderCart()}});
+$('checkout-btn').onclick=()=>run(async()=>{$('checkout-btn').disabled=true;try{await createOrder();toast('订单已预留库存，等待支付确认')}finally{renderCart()}});
 $('pay-btn').onclick=()=>run(async()=>{if(!state.orderId)throw Error('尚无待付订单');$('pay-btn').disabled=true;
  if(state.paymentProvider==='WECHAT_NATIVE'){
    const r=await api('/api/orders/'+state.orderId+'/wechat-native',{method:'POST',guest:true});
    $('payment-qr').src=r.qr_data_uri;$('payment-qr').hidden=false;$('cancel-order-btn').disabled=true;pollVerifiedPayment(state.orderId);
-   $('payment-result').textContent='请从另一台设备扫描微信支付二维码；付款后系统自动等待已验签通知，不以此页面作为收款证明。';
+   $('payment-result').textContent='未付款 · 请从另一台设备扫描微信支付二维码；付款后以服务端验签为准。';
+   $('payment-result').className='inline-note pay-banner unpaid';
    toast('收款二维码已生成，请通过后台核对实际付款状态');return;
  }
  if(state.paymentProvider!=='MOCK_ONLY')throw Error('没有配置可用的收款渠道');
- const r=await api('/api/payments/mock-confirm',{method:'POST',body:{order_id:state.orderId},guest:true});
- $('payment-result').textContent=r.status==='PAID'?'模拟支付成功 · 已原子扣库存 · '+money(r.total_cents):'订单已过期，请重新下单';
- if(r.status==='PAID'){state.cart.clear();state.orderId='';$('cancel-order-btn').disabled=true;await loadProducts()}
- toast(r.status==='PAID'?'模拟支付完成（没有真实资金流转）':'订单已过期')});
+ const r=await confirmMock();
+ toast(r.status==='PAID'?'模拟支付完成（没有真实资金流转）':describePayment(r).text)});
+$('cart-pay').onclick=()=>run(async()=>{if(state.paymentProvider==='WECHAT_NATIVE'){if(!state.orderId)await createOrder();$('pay-btn').click();return}if(state.paymentProvider!=='MOCK_ONLY')throw Error('没有配置可用的收款渠道');if(!state.orderId)await createOrder();const r=await confirmMock();toast(r.status==='PAID'?'模拟支付完成（没有真实资金流转）':describePayment(r).text)});
 $('redeem-btn').onclick=()=>run(async()=>{
  const invite=$('invite-token').value.trim();const r=await api('/api/entry/redeem',{method:'POST',body:{invite}});
  state.token=r.guest_token;sessionStorage.setItem('retail_guest',state.token);
  $('invite-token').value='';$('entry-result').textContent='已领取员工发放的结账会话；不会打开门禁。';
- await loadProducts();toast('已领取有效结账会话');
+ await showEntryStatus();await loadProducts();toast('已领取有效结账会话');
 });
 const inviteFromUrl=new URLSearchParams(location.search).get('invite');
 if(inviteFromUrl){history.replaceState(null,'',location.pathname);$('invite-token').value=inviteFromUrl;
  run(async()=>{const r=await api('/api/entry/redeem',{method:'POST',body:{invite:inviteFromUrl}});
  state.token=r.guest_token;sessionStorage.setItem('retail_guest',state.token);$('invite-token').value='';
- $('entry-result').textContent='结账会话已领取；这不是进店权限。';await loadProducts();toast('结账会话已激活')});}
+ $('entry-result').textContent='结账会话已领取；这不是进店权限。';await showEntryStatus();await loadProducts();toast('结账会话已激活')});}
 $('issue-invite').onclick=()=>run(async()=>{
  const r=await api('/api/admin/checkout-invite',{admin:true,method:'POST'});
  $('invite-result').textContent='一次性链接，有效期至 '+time(r.expires_at)+'。请让顾客扫码，不能作为进门凭证。';
@@ -63,7 +79,7 @@ $('issue-invite').onclick=()=>run(async()=>{
 $('cancel-order-btn').onclick=()=>run(async()=>{if(!state.orderId)return;
  const r=await api('/api/orders/'+state.orderId+'/cancel',{method:'POST',guest:true});
  state.orderId='';$('pay-btn').disabled=true;$('cancel-order-btn').disabled=true;
- $('payment-qr').hidden=true;$('payment-result').textContent='订单 '+r.id.slice(0,10)+' 已取消，预留库存释放';
+ $('payment-qr').hidden=true;showPay(r);await refreshMine();
  await loadProducts();toast('已取消未付款订单');
 });
 async function pollVerifiedPayment(orderId){
@@ -73,14 +89,12 @@ async function pollVerifiedPayment(orderId){
   if(state.orderId!==orderId)return;
   try{
    const r=await api('/api/orders/'+orderId,{guest:true});
-   if(r.status==='PAID'){
-    $('payment-result').textContent='商户已验签确认付款成功 · 订单 '+orderId.slice(0,10);
-    $('payment-qr').hidden=true;state.cart.clear();state.orderId='';await loadProducts();toast('付款成功');return;
+   if(r.status==='PAID'||r.status==='EXPIRED'||r.status==='CANCELLED'||r.status==='PAYMENT_REVIEW'){
+    showPay(r);await refreshMine();
+    if(r.status==='PAID'){$('payment-qr').hidden=true;state.cart.clear();state.orderId='';await loadProducts();toast(r.real_money?'已验签付款':'付款状态已更新');return}
+    if(r.status!=='PAYMENT_REVIEW'){$('payment-qr').hidden=true;state.orderId='';return}
+    return;
    }
-   if(r.status==='PAYMENT_REVIEW'){
-    $('payment-result').textContent='付款状态异常，请联系工作人员核对；不要重复付款';return;
-   }
-   if(r.status==='CANCELLED'){$('payment-result').textContent='订单已关闭，请重新购买';return;}
   }catch(e){/* 临时断网，不代表支付成功或失败 */}
   if(Date.now()-began<120000)state.paymentPollId=setTimeout(check,5000);
   else $('payment-result').textContent='付款结果仍待商户确认，请联系工作人员查单。请勿重复付款。';
@@ -94,6 +108,6 @@ $('refresh-admin').onclick=()=>run(async()=>{await adminRefresh();await loadProd
 $('product-form').onsubmit=e=>{e.preventDefault();run(async()=>{const f=new FormData(e.target);const r=await api('/api/admin/products',{admin:true,method:'POST',body:{barcode:String(f.get('barcode')).trim(),name:String(f.get('name')).trim(),price_cents:Math.round(Number(f.get('price'))*100),stock:Number(f.get('stock')),active:true}});if(r.ok){$('product-status').textContent='商品已保存';e.target.reset();await adminRefresh();await loadProducts();toast('商品保存成功')}})};
 async function uploadCsv(dry){const file=$('csv-file').files?.[0];if(!file)throw Error('请先选择 CSV 文件');if(!dry&&!confirm('仅允许首次建账导入；已有订单将拒绝覆盖库存。确定继续？'))return;const data=new FormData();data.append('file',file);const r=await api('/api/admin/import-products?dry_run='+String(dry),{admin:true,method:'POST',form:true,body:data});$('csv-status').textContent=dry?'检查通过，共 '+r.count+' 条：'+r.preview.map(x=>x.name).slice(0,4).join('、'):'已导入 '+r.count+' 条商品。注意不会自动同步到 OSPOS。';if(!dry){await loadProducts();await adminRefresh()}toast(dry?'CSV 检查通过':'CSV 已导入')}
 $('csv-preview').onclick=()=>run(()=>uploadCsv(true));$('csv-import').onclick=()=>run(()=>uploadCsv(false));
-if(state.token){$('door-btn').disabled=false;$('entry-result').textContent='已恢复当前浏览器的访客会话（可能已过期）'}
+if(state.token){$('door-btn').disabled=false;$('entry-result').textContent='已恢复当前浏览器的访客会话（可能已过期）';run(async()=>{await showEntryStatus();await refreshMine()})}
 // 管理员密码和 CSRF 令牌仅存在内存中；刷新页面后需重新登录。
 run(async()=>{await store();await loadProducts()});

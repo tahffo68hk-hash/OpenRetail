@@ -101,6 +101,10 @@ def test_non_demo_has_no_unauthenticated_guest_and_no_real_unlock(tmp_path):
         assert guest.json()['identity_verified'] is False
         assert c.post('/api/entry/redeem',json={'invite':invite['invite']}).status_code==401
         token={'Authorization':'Bearer '+guest.json()['guest_token']}
+        entry=c.get('/api/entry/status',headers=token).json()
+        assert entry['physical_door_opened'] is False and entry['door_authorized'] is False
+        assert entry['events'][0]['result']=='CHECKOUT_SESSION'
+        assert entry['events'][0]['detail']=='NOT A DOOR GRANT'
         assert c.post('/api/door/open',headers=token).status_code==503
         assert c.put('/api/admin/mode',headers=csrf,json={'mode':'UNATTENDED'}).status_code==409
         assert c.post('/api/payments/mock-confirm',headers=token,json={'order_id':'anything'}).status_code==403

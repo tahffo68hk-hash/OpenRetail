@@ -23,7 +23,7 @@ def test_unattended_mock_entry_flow(client,admin_header):
     assert ok.status_code==200 and ok.json()['result']=='SIMULATED'
     assert ok.json()['physical_door_opened'] is False
     overview=client.get('/api/admin/overview',headers=admin_header).json()
-    assert overview['door_events']==1
+    assert overview['door_events']==2
 
 
 def test_purchase_and_duplicate_pay(client,admin_header):
@@ -129,5 +129,6 @@ def test_example_placeholder_secrets_rejected(tmp_path):
     from openretail.config import Settings
     import pytest
     with pytest.raises(RuntimeError,match='placeholder'):
-        Settings(db_path=str(tmp_path/'x.db'),admin_key='REPLACE_WITH_RANDOM_ADMIN_KEY',
+        Settings(db_path=str(tmp_path/'x.db'),app_mode='staging',mock_payments=False,
+                 admin_key='REPLACE_WITH_RANDOM_ADMIN_KEY',
                  integration_key='I'*40,app_secret='S'*40).validate()

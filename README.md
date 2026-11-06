@@ -146,4 +146,4 @@ pip install -r requirements-ui.txt
 python scripts/ui_bridge_smoke.py
 ```
 
-脚本将实际 Chromium 页面中的 HTTP 请求桥接到 FastAPI TestClient，避免测试电脑禁止 localhost 网页导航。它适合离线 UI 回归，但不替代真实域名/HTTPS/手机浏览器/支付终端验收。
+脚本将实际 Chromium 页面中的 HTTP 请求桥接到 FastAPI TestClient，避免测试电脑禁止 localhost 网页导航。它适合离线 UI 回归，但不替代真实域名/HTTPS/手机浏览器/支付终端验收。干净工作区可以直接运行：导入应用不会先要求密钥。真正启动 `uvicorn openretail.main:app` 时，若演示档还没有 `.env`，进程会在内存里生成一次性 `ADMIN_KEY` 并打印到标准错误，不会写进磁盘。预发和正式档仍然缺少配置就拒绝启动。
