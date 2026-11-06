@@ -51,6 +51,7 @@ def run_doctor(cfg:Settings,init_demo:bool=False)->str:
         '检查模式：'+action,
         '数据库检查：'+check,
         '数据源：SQLite 单实例，不支持多进程写入或网络文件系统',
+        '库存权威：本仓库 SQLite。OSPOS 与 ERPNext 不得作为第二套扣减同一库存的权威',
         '应用模式：'+cfg.app_mode,
         '配置档：'+cfg.profile,
         '营业模式：'+','.join(modes),

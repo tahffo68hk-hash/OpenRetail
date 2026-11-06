@@ -52,6 +52,10 @@ class ProductInput(BaseModel):
 
 class ModeInput(BaseModel):mode:str
 class FakePayment(BaseModel):order_id:str
+class MockNotify(BaseModel):
+    order_id:str=Field(min_length=32,max_length=32)
+    event_id:str=Field(min_length=1,max_length=128)
+    amount_cents:int|None=Field(default=None,ge=1)
 class Login(BaseModel):password:str=Field(min_length=1,max_length=256)
 class RedeemInvite(BaseModel):invite:str=Field(min_length=24,max_length=128)
 class FrigateMessage(BaseModel):
@@ -149,6 +153,7 @@ def create_app(settings:Settings|None=None)->FastAPI:
             paid=c.execute('SELECT id,provider FROM payments WHERE order_id=?',(order_id,)).fetchone()
             if paid and paid['id']==transaction_id and paid['provider']==provider:return 'IDEMPOTENT'
             return 'CONFLICT_DIFFERENT_PAYMENT'
+        if row['status']=='REFUNDED':return 'REFUNDED'
         if row['status'] not in ('PENDING','PAYMENT_PENDING'):
             c.execute("UPDATE orders SET status='PAYMENT_REVIEW' WHERE id=?",(order_id,))
             db.audit(c,'payment','LATE_PAYMENT_REVIEW',order_id)
@@ -325,18 +330,171 @@ def create_app(settings:Settings|None=None)->FastAPI:
             db.audit(c,'visitor','ORDER_CANCELLED',order_id)
             return row_order(c,order_id)
 
+    def mock_enabled():
+        if not(cfg.demo and cfg.mock_payments):abort(403,'模拟支付仅允许演示模式，不会访问微信支付')
+
+    def mock_body(**extra):
+        # verified=0 and MOCK_NOT_REAL_MONEY are the durable marks that this is not money.
+        return {'provider':'MOCK_NOT_REAL_MONEY','verified':0,'real_money':False,'remote_call':False,**extra}
+
+    def reject_external_payment(row,payment=None):
+        if payment and (payment['provider']!='MOCK_NOT_REAL_MONEY' or int(payment['verified'])!=0):
+            abort(409,'拒绝把非模拟支付当作模拟单处理')
+        ref=row['payment_reference'] or ''
+        if row['status']=='PAYMENT_PENDING' and not ref.startswith('mock:'):
+            abort(409,'外部或未确认的支付单不会由模拟通道处理')
+        if ref and not ref.startswith('mock:'):
+            abort(409,'外部支付单不会由模拟通道查询、关闭或退款')
+
+    def mock_trade_state(row,payment):
+        if row['status']=='PAID' and payment and payment['provider']=='MOCK_NOT_REAL_MONEY' and int(payment['verified'])==0:
+            return 'SUCCESS'
+        if row['status']=='REFUNDED':return 'REFUND'
+        if row['status'] in ('CANCELLED','EXPIRED'):return 'CLOSED'
+        if row['status'] in ('PENDING','PAYMENT_PENDING'):return 'NOTPAY'
+        if row['status']=='PAYMENT_REVIEW':return 'REVIEW'
+        return 'UNKNOWN'
+
+    def load_payment(c,order_id):
+        return c.execute('SELECT id,provider,verified FROM payments WHERE order_id=?',(order_id,)).fetchone()
+
     @app.post('/api/payments/mock-confirm')
     def mock_confirm(payload:FakePayment,sid:str=Depends(guest)):
-        if not(cfg.demo and cfg.mock_payments):abort(403,'模拟支付仅允许演示模式')
+        mock_enabled()
         with db.tx() as c:
             db.expire(c,now())
             row=order_owned(c,payload.order_id,sid)
-            if row['status']=='EXPIRED':return {'id':row['id'],'status':'EXPIRED','reason':'已超时，请重新下单'}
+            if row['status']=='EXPIRED':return {'id':row['id'],'status':'EXPIRED','reason':'已超时，请重新下单',**mock_body()}
             if row['status']=='PAID':return row_order(c,row['id'])
-            if row['status']!='PENDING':abort(409,'订单状态不允许模拟支付')
+            if row['status']=='REFUNDED':abort(409,'模拟退款已完成，不能再次确认付款')
+            if row['status']=='PAYMENT_PENDING' and not str(row['payment_reference'] or '').startswith('mock:'):
+                abort(409,'订单在外部支付处理中，不能用模拟支付确认')
+            if row['status'] not in ('PENDING','PAYMENT_PENDING'):abort(409,'订单状态不允许模拟支付')
             outcome=settle(c,row['id'],'MOCK_NOT_REAL_MONEY','mock_'+row['id'],False)
             if outcome!='PAID':abort(409,'模拟付款异常，需人工复核')
             return row_order(c,row['id'])
+
+    @app.post('/api/orders/{order_id}/mock-checkout')
+    def mock_checkout(order_id:str,sid:str=Depends(guest)):
+        """Open a local sandbox checkout. No socket is opened."""
+        mock_enabled()
+        with db.tx() as c:
+            db.expire(c,now())
+            row=order_owned(c,order_id,sid)
+            if row['status']=='EXPIRED':
+                return mock_body(order_id=order_id,outcome='EXPIRED',trade_state='CLOSED',order_status='EXPIRED')
+            if row['status']=='PAYMENT_PENDING' and str(row['payment_reference'] or '').startswith('mock:'):
+                return mock_body(order_id=order_id,outcome='IDEMPOTENT',trade_state='NOTPAY',
+                                 order_status='PAYMENT_PENDING',payment_reference=row['payment_reference'])
+            if row['status']!='PENDING':abort(409,'订单状态不允许发起模拟收款')
+            ref='mock:'+order_id
+            cur=c.execute('''UPDATE orders SET status='PAYMENT_PENDING',payment_reference=?,expires_at=?
+                             WHERE id=? AND status='PENDING' ''',(ref,now()+900,order_id))
+            if cur.rowcount!=1:abort(409,'模拟收款状态已变化')
+            db.audit(c,'payment','MOCK_CHECKOUT_STARTED',order_id)
+            return mock_body(order_id=order_id,outcome='PAYMENT_PENDING',trade_state='NOTPAY',
+                             order_status='PAYMENT_PENDING',payment_reference=ref)
+
+    @app.get('/api/orders/{order_id}/mock-payment')
+    def mock_query(order_id:str,sid:str=Depends(guest)):
+        mock_enabled()
+        with db.tx() as c:
+            db.expire(c,now())
+            row=order_owned(c,order_id,sid)
+            payment=load_payment(c,order_id)
+            reject_external_payment(row,payment)
+            return mock_body(order_id=order_id,trade_state=mock_trade_state(row,payment),
+                             order_status=row['status'],expires_at=row['expires_at'])
+
+    @app.post('/api/payments/mock-notify')
+    def mock_notify(payload:MockNotify,sid:str=Depends(guest)):
+        """Idempotent local confirm. event_id replays do not move stock twice."""
+        mock_enabled()
+        with db.tx() as c:
+            db.expire(c,now())
+            order_owned(c,payload.order_id,sid)
+            existing=c.execute('SELECT outcome FROM payment_notifications WHERE event_id=?',(payload.event_id,)).fetchone()
+            row=c.execute('SELECT * FROM orders WHERE id=?',(payload.order_id,)).fetchone()
+            if existing:
+                return mock_body(code='SUCCESS',outcome='IDEMPOTENT',order_status=row['status'],event_id=payload.event_id)
+            if payload.amount_cents is not None and payload.amount_cents!=row['total_cents']:
+                abort(422,'支付金额与订单不一致')
+            payment=load_payment(c,payload.order_id)
+            reject_external_payment(row,payment)
+            if row['status']=='EXPIRED':
+                c.execute('''INSERT INTO payment_notifications(event_id,provider,order_id,outcome,received_at)
+                             VALUES(?,?,?,?,?)''',(payload.event_id,'MOCK_NOT_REAL_MONEY',payload.order_id,'EXPIRED',now()))
+                return mock_body(code='SUCCESS',outcome='EXPIRED',order_status='EXPIRED',event_id=payload.event_id)
+            if row['status']=='REFUNDED':abort(409,'模拟退款已完成，不能再次确认付款')
+            if row['status'] not in ('PENDING','PAYMENT_PENDING','PAID'):abort(409,'订单状态不允许模拟通知')
+            outcome=settle(c,payload.order_id,'MOCK_NOT_REAL_MONEY','mock_'+payload.order_id,False)
+            if outcome not in ('PAID','IDEMPOTENT'):abort(409,'模拟付款异常，需人工复核')
+            c.execute('''INSERT INTO payment_notifications(event_id,provider,order_id,outcome,received_at)
+                         VALUES(?,?,?,?,?)''',(payload.event_id,'MOCK_NOT_REAL_MONEY',payload.order_id,outcome,now()))
+            paid=load_payment(c,payload.order_id)
+            if not paid or paid['provider']!='MOCK_NOT_REAL_MONEY' or int(paid['verified'])!=0:
+                raise RuntimeError('mock settlement lost its unverified marker')
+            return mock_body(code='SUCCESS',outcome=outcome,order_status='PAID',event_id=payload.event_id)
+
+    @app.post('/api/admin/orders/{order_id}/mock-close',dependencies=[Depends(admin)])
+    def mock_close(order_id:str):
+        mock_enabled()
+        with db.tx() as c:
+            row=c.execute('SELECT * FROM orders WHERE id=?',(order_id,)).fetchone()
+            if not row:abort(404,'订单不存在')
+            if row['status'] in ('CANCELLED','EXPIRED'):
+                return mock_body(order_id=order_id,outcome='IDEMPOTENT',trade_state='CLOSED',order_status=row['status'])
+            if row['status']=='PAID':abort(409,'已模拟支付的订单不能关单，如需退回库存请使用模拟退款')
+            if row['status']=='REFUNDED':abort(409,'订单已模拟退款')
+            local_pending=row['status']=='PENDING' or (row['status']=='PAYMENT_PENDING' and str(row['payment_reference'] or '').startswith('mock:'))
+            if not local_pending:abort(409,'外部支付单请使用微信查单关单，模拟关单不会访问微信')
+            db.release(c,order_id,'MOCK_CLOSED')
+            c.execute("UPDATE orders SET status='CANCELLED' WHERE id=? AND status IN ('PENDING','PAYMENT_PENDING')",(order_id,))
+            db.audit(c,'operator','MOCK_CLOSED',order_id)
+            return mock_body(order_id=order_id,outcome='CLOSED',trade_state='CLOSED',order_status='CANCELLED')
+
+    @app.post('/api/admin/orders/{order_id}/reconcile-mock',dependencies=[Depends(admin)])
+    def reconcile_mock(order_id:str):
+        """Apply local timeout, then report sandbox state. Does not call WeChat."""
+        mock_enabled()
+        with db.tx() as c:
+            expired=db.expire(c,now())
+            row=c.execute('SELECT * FROM orders WHERE id=?',(order_id,)).fetchone()
+            if not row:abort(404,'订单不存在')
+            payment=load_payment(c,order_id)
+            reject_external_payment(row,payment)
+            return mock_body(order_id=order_id,trade_state=mock_trade_state(row,payment),
+                             order_status=row['status'],expired_last_check=expired)
+
+    @app.post('/api/admin/orders/{order_id}/mock-refund',dependencies=[Depends(admin)])
+    def mock_refund(order_id:str):
+        """Restore SQLite stock for an unverified mock sale. No provider refund exists."""
+        mock_enabled()
+        with db.tx() as c:
+            row=c.execute('SELECT * FROM orders WHERE id=?',(order_id,)).fetchone()
+            if not row:abort(404,'订单不存在')
+            if row['status']=='REFUNDED':
+                return mock_body(order_id=order_id,outcome='IDEMPOTENT',trade_state='REFUND',
+                                 order_status='REFUNDED',stock_restored=False)
+            if row['status']!='PAID':abort(409,'只有已模拟支付的订单可以退回库存')
+            payment=load_payment(c,order_id)
+            if not payment or payment['provider']!='MOCK_NOT_REAL_MONEY' or int(payment['verified'])!=0:
+                abort(409,'拒绝退款：不是未核验的模拟支付，不会调用真实退款接口')
+            items=c.execute('SELECT product_id,quantity FROM order_lines WHERE order_id=?',(order_id,)).fetchall()
+            for item in items:
+                product=c.execute('SELECT stock FROM products WHERE id=?',(item['product_id'],)).fetchone()
+                if not product or product['stock']+item['quantity']>1_000_000:abort(409,'退回后库存超出上限')
+            for item in items:
+                cur=c.execute('UPDATE products SET stock=stock+? WHERE id=?',(item['quantity'],item['product_id']))
+                if cur.rowcount!=1:raise RuntimeError('mock refund stock update failed')
+                db.movement(c,item['product_id'],item['quantity'],0,'MOCK_REFUND_RESTORE',order_id)
+            cur=c.execute("UPDATE orders SET status='REFUNDED' WHERE id=? AND status='PAID'",(order_id,))
+            if cur.rowcount!=1:raise RuntimeError('mock refund lost the paid row')
+            c.execute('INSERT INTO refunds(id,order_id,provider,amount_cents,created_at) VALUES(?,?,?,?,?)',
+                      ('mock_refund_'+order_id,order_id,'MOCK_NOT_REAL_MONEY',row['total_cents'],now()))
+            db.audit(c,'operator','MOCK_REFUND',order_id)
+            return mock_body(order_id=order_id,outcome='REFUNDED',trade_state='REFUND',
+                             order_status='REFUNDED',stock_restored=True)
 
     @app.post('/api/orders/{order_id}/wechat-native')
     def initiate_wechat(order_id:str,sid:str=Depends(guest)):
@@ -566,6 +724,27 @@ def create_app(settings:Settings|None=None)->FastAPI:
     def stock_movements(limit:int=Query(default=100,ge=1,le=500)):
         with db.connect() as c:
             return [asdict(x) for x in c.execute('SELECT * FROM stock_movements ORDER BY id DESC LIMIT ?', (limit,))]
+
+    @app.get('/api/admin/inventory-ledger',dependencies=[Depends(admin)])
+    def inventory_ledger(limit:int=Query(default=200,ge=1,le=500)):
+        """SQLite is the inventory system of record. Balances must match movement sums."""
+        with db.connect() as c:
+            products=[]
+            balanced=True
+            for row in c.execute('''SELECT p.id product_id,p.barcode,p.name,p.stock,p.reserved_stock,
+                    COALESCE(SUM(m.stock_delta),0) ledger_stock,
+                    COALESCE(SUM(m.reserved_delta),0) ledger_reserved
+                    FROM products p LEFT JOIN stock_movements m ON m.product_id=p.id
+                    GROUP BY p.id ORDER BY p.id'''):
+                item=asdict(row)
+                item['balanced']=item['stock']==item['ledger_stock'] and item['reserved_stock']==item['ledger_reserved']
+                balanced=balanced and item['balanced']
+                products.append(item)
+            movements=[asdict(x) for x in c.execute('''SELECT id,product_id,stock_delta,reserved_delta,reason,reference,created_at,
+                    SUM(stock_delta) OVER (PARTITION BY product_id ORDER BY id) stock_after,
+                    SUM(reserved_delta) OVER (PARTITION BY product_id ORDER BY id) reserved_after
+                    FROM stock_movements ORDER BY id DESC LIMIT ?''',(limit,))]
+        return {'system_of_record':'sqlite','balanced':balanced,'products':products,'movements':movements}
 
     @app.get('/api/admin/events',dependencies=[Depends(admin)])
     def admin_events():

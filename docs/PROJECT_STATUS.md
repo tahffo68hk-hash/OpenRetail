@@ -2,7 +2,38 @@
 
 复核对象：公开仓库 `https://github.com/tahffo68hk-hash/OpenRetail`，`main` HEAD `2e408a1fff5698e3c00aa58231e65df214cc840b`。结论只来自本次阅读、官方文档查阅和本机实际运行。更早的代理记录在被本次复现之前都算未核实。
 
-完全无人值守经营仍是 **NOT_APPROVED**。示例配置里的真实支付和实体开锁都是关闭的。本次没有改业务代码。
+完全无人值守经营仍是 **NOT_APPROVED**。示例配置里的真实支付和实体开锁都是关闭的。
+
+## 店主决定（2026-11-06）
+
+库存系统权威是本仓库的 SQLite。这是已决定的事实，不是建议。OSPOS 与 ERPNext 不得作为第二套权威去扣减同一库存。OSPOS 以后只可再评估为可选适配器。详见 `DECISIONS.md`。
+
+## 随后实现的模拟支付与库存流水
+
+在上述决定之后，演示模式增加了本地沙箱，不访问 `api.mch.weixin.qq.com`：
+
+- `POST /api/orders/{id}/mock-checkout`：进入本地 `PAYMENT_PENDING`，引用以 `mock:` 开头。
+- `GET /api/orders/{id}/mock-payment` 与 `POST /api/admin/orders/{id}/reconcile-mock`：查本地状态。
+- `POST /api/admin/orders/{id}/mock-close`：关闭未支付的本地单并释放预留。
+- 超时：`PENDING`，以及 `payment_reference` 以 `mock:` 开头的 `PAYMENT_PENDING`，到期后释放库存。微信 `PAYMENT_PENDING`（`weixin://` 或尚未写回引用）不会被这个计时器释放。
+- `POST /api/payments/mock-notify`：按 `event_id` 幂等确认。重复事件或已支付后再通知，不会第二次扣库存。
+- `POST /api/payments/mock-confirm`：仍是一步模拟确认。记账名 `MOCK_NOT_REAL_MONEY`，`payments.verified=0`。
+- `POST /api/admin/orders/{id}/mock-refund`：只接受未核验的模拟支付，把 SQLite 库存加回，订单变为 `REFUNDED`。重复退款不重复加库存。已核验或非模拟支付返回 409，不会调用机构退款。
+- `GET /api/admin/inventory-ledger`：用库存流水合计核对 `stock` / `reserved_stock`。没有流水的商品在初始化时补一条 `OPENING_BALANCE`。
+
+这些行为由 `tests/test_mock_ledger.py` 覆盖，包括并发抢一件库存、取消释放和退款回补。支付宝没有新增。`LIVE_DOOR_ENABLED` 仍会拒绝启动。
+
+该增量之后的 pytest（工作目录 `/workspace`，Python 3.12.3）：
+
+```bash
+/tmp/openretail-venv/bin/python -m pytest -q
+```
+
+**41 passed，1 warning，3.19s，退出码 0。** 警告仍是 Starlette 对 `httpx` TestClient 的弃用提示。41 = 原有 35 + 新增 6。同一命令在实现刚完成时是 3.56s，文档定稿前再跑一次是 3.19s，两次都是 41 passed、退出码 0。
+
+## 第一次源码复核（改业务代码之前）
+
+下面这一节是同一天较早的只读复核。当时还没有模拟查单、关单、退款和总账接口。表里的「没有退款代码」描述的是那一次，不是现在。
 
 ## 本次实际跑过的命令
 
@@ -47,13 +78,9 @@ python3 -m venv /tmp/openretail-venv
 - OSPOS 只是 CSV 列名适配。ERPNext 只读 `Item` 预览，且 `ready_for_sale=false`。二者都不是第二套正在运行的库存权威。
 - `docs/VERIFICATION.md` 写「尚未执行线下恢复演练」。那是 2026-11-04 的句子。2026-11-06 的隔离恢复演练已经做过，见上。
 
-## 建议，不是已决定的事实
+## 下一步（尚未做到）
 
-单店、约 20–50㎡ 的 v1，建议继续用 OpenRetail 自己的 SQLite 作为库存权威。OSPOS 以后可以做成适配器或收银交换，前提是它的数据模型和真实集成路径明显省下成月的工作；今天不能把它的外部 API 当成稳定接口。现在不要引入 ERPNext。店主仍要自己做这个决定。详见 `DECISIONS.md` 和 `TECH_ROADMAP.md`。
-
-## 下一步
-
-1. 用商户测试材料做不产生真实扣款的支付联调：下单、验签、重复通知、金额不符、查单、关单。退款和日终对账仍缺。不要把模拟支付标成已收款。
-2. 让 `scripts/ui_bridge_smoke.py` 在导入应用之前自行准备演示环境，避免干净工作区直接失败。这是脚本缺口，不是本次要改的业务逻辑。
-3. 在店内电脑上跑有人值守试点前，先过 `PRODUCTION_GATE.md` 的 A 节。无人值守保持关闭。
+1. 真实微信仍未联调。官方域名还是 `api.mch.weixin.qq.com`。本地 `MockTransport` 和 `mock:` 沙箱都不是微信沙箱验收。真实退款和日终账单仍没有。
+2. 让 `scripts/ui_bridge_smoke.py` 在导入应用之前自行准备演示环境。页面还没有模拟退款按钮；退款目前只在 API 测试里验证过。
+3. 有人值守试点前先过 `PRODUCTION_GATE.md` 的 A 节。无人值守保持关闭。
 4. 店内运行放在本地机器上。这台开发用云端虚拟机不是门店运行时。
