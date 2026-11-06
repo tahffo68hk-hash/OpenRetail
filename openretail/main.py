@@ -232,6 +232,8 @@ def create_app(settings:Settings|None=None)->FastAPI:
     app.state.cancel_inflight=set()
     app.state.refund_guard=threading.Lock()
     app.state.refund_inflight=set()
+    app.state.close_guard=threading.Lock()
+    app.state.close_inflight=set()
 
     @app.middleware('http')
     async def security_headers(request:Request,call_next):
@@ -841,7 +843,8 @@ def create_app(settings:Settings|None=None)->FastAPI:
         if not row:abort(404,'订单不存在')
         if row['status'] in ('CANCELLED','EXPIRED'):
             return mock_body(order_id=order_id,outcome='IDEMPOTENT',trade_state='CLOSED',order_status=row['status'],
-                             stock_changed=False,physical_door_opened=False)
+                             stock_changed=False,physical_door_opened=False,duplicate=False,
+                             identity_verified=False,door_authorized=False)
         if row['status']=='PAID':abort(409,'已模拟支付的订单不能关单，如需退回库存请使用模拟退款')
         if row['status']=='REFUNDED':abort(409,'订单已模拟退款')
         local_pending=row['status']=='PENDING' or (row['status']=='PAYMENT_PENDING' and str(row['payment_reference'] or '').startswith('mock:'))
@@ -854,13 +857,26 @@ def create_app(settings:Settings|None=None)->FastAPI:
         if stock_before!=stock_after:raise RuntimeError('close changed on-hand stock')
         db.audit(c,actor,'ORDER_CLOSED',order_id)
         return mock_body(order_id=order_id,outcome='CLOSED',trade_state='CLOSED',order_status='CANCELLED',
-                         stock_changed=False,physical_door_opened=False)
+                         stock_changed=False,physical_door_opened=False,duplicate=False,
+                         identity_verified=False,door_authorized=False)
 
     @app.post('/api/admin/orders/{order_id}/mock-close')
     def mock_close(order_id:str, actor:str=Depends(admin)):
         mock_enabled()
-        with db.tx() as c:
-            return close_holding_order(c,order_id,actor)
+        with app.state.close_guard:
+            if order_id in app.state.close_inflight:
+                return mock_body(order_id=order_id,outcome='IDEMPOTENT',trade_state='CLOSED',order_status=None,
+                                 stock_changed=False,physical_door_opened=False,duplicate=True,
+                                 identity_verified=False,door_authorized=False)
+            app.state.close_inflight.add(order_id)
+        try:
+            hold=getattr(app.state,'hold_close',None)
+            if hold:hold()
+            with db.tx() as c:
+                return close_holding_order(c,order_id,actor)
+        finally:
+            with app.state.close_guard:
+                app.state.close_inflight.discard(order_id)
 
     @app.post('/api/admin/orders/{order_id}/reconcile-mock',dependencies=[Depends(admin)])
     def reconcile_mock(order_id:str):
