@@ -42,34 +42,73 @@
       <div class="page-heading"><div><div class="eyebrow">OPERATIONS CENTER</div><h1>店主经营工作台</h1><p>管理有人/无人模式、库存、订单与视频事件。</p></div><span class="chip">密码登录 · 会话隔离</span></div>
       <div class="admin-auth surface"><label for="admin-key">管理员密码</label><div class="key-row"><input type="password" id="admin-key" placeholder="输入管理员密码（本地演示可使用 ADMIN_KEY）" autocomplete="off"><button id="admin-login" class="btn primary">进入工作台</button><button id="admin-logout" class="btn secondary">退出</button></div><p class="muted small">登录后通过 HttpOnly Cookie 维持会话，敏感管理操作需 CSRF 令牌；生产多用户角色权限仍待扩展。</p></div>
       <div id="admin-body" hidden>
-        <article class="surface invite-panel"><div class="surface-heading"><div><h2>员工签发结账邀请码</h2>
-          <p>仅限有人营业的试点；不授权真实门禁，不代表身份核验。</p></div><button id="issue-invite" class="btn secondary">创建2分钟邀请码</button></div>
-          <div id="invite-result" class="inline-note">尚未生成</div><img id="invite-qr" class="qr-code" alt="试点结账二维码" hidden></article>
-        <div class="metrics"><div class="metric"><span>已付订单（含模拟）</span><strong id="m-orders">—</strong></div><div class="metric"><span>模拟销售额（非真实资金）</span><strong id="m-sales">—</strong></div><div class="metric"><span>已验签金额（真实资金）</span><strong id="m-real">—</strong></div><div class="metric"><span>商品 SKU</span><strong id="m-products">—</strong></div><div class="metric"><span>进店动作</span><strong id="m-entries">—</strong></div></div>
-        <article class="surface" id="ops-summary"><div class="surface-heading"><div><h2>今日需要处理</h2><p>今日按门店时区的自然日，默认 Asia/Shanghai。低库存看账面数量。预留仍是未结算占用，不是第二套库存。</p></div></div><p id="today-summary" class="inline-note">登录后显示</p><p id="help-attention" class="inline-note">求助未结案：—</p><div id="low-stock-list" class="events"><p class="muted">没有达到阈值的商品</p></div><form id="store-settings-form" class="product-form"><label>低库存阈值<input id="low-stock-threshold" name="threshold" type="number" min="1" max="10000" required></label><label>门店时区<input id="store-timezone" name="timezone" required placeholder="Asia/Shanghai"></label><button class="btn secondary" type="submit">保存门店设置</button></form><div id="store-settings-status" class="inline-note">尚未修改</div></article>
-        <article class="surface"><div class="surface-heading"><div><h2>数据库备份</h2><p>在线备份可下载。上传只做隔离预览，不会替换正在使用的库，也不会开门或收款。</p></div></div><button id="backup-download" class="btn secondary" type="button">下载备份</button><form id="restore-preview-form" class="product-form"><label>备份文件<input id="restore-file" name="backup" type="file" accept=".sqlite3,.db,application/vnd.sqlite3" required></label><button class="btn secondary" type="submit">隔离恢复预览</button></form><div id="restore-report" class="inline-note">尚未备份</div></article>
-        <div class="admin-grid">
-          <article class="surface"><div class="surface-heading"><div><h2>营业模式</h2><p>试点只允许有人模式；不控制实际营业门</p></div></div><div class="mode-options"><button id="mode-staffed" class="mode-btn">☀️ 有人经营</button><button id="mode-unattended" class="mode-btn">🌙 无人值守</button></div><div class="inline-note" id="mode-info">当前模式：—</div></article>
-          <article class="surface"><div class="surface-heading"><div><h2>集成连接状态</h2><p>真实门禁保持关闭；视频桥接需单独部署</p></div></div><div class="integrations"><div><b>Home Assistant</b><span id="ha-state">未启用</span></div><div><b>Frigate MQTT</b><span>可选桥接进程</span></div><div><b>支付与实际门禁</b><span class="status-warning">现场验收前禁用</span></div><div><b>OSPOS / ERPNext</b><span>CSV / 只读适配</span></div></div></article>
-        </div>
-        <div class="admin-grid">
-          <article class="surface"><div class="surface-heading"><div><h2>单品维护</h2><p>有订单后不能整表覆盖。新增、改价和库存调整都只写本库 SQLite。</p></div></div>
-            <form id="product-form" class="product-form"><label>条码<input name="barcode" placeholder="新条码" required></label><label>名称<input name="name" placeholder="商品名称" required></label><label>售价（元）<input name="price" type="number" min="0.01" step="0.01" required></label><label>期初库存<input name="stock" type="number" min="0" step="1" required></label><button class="btn primary" type="submit">新增商品</button></form>
-            <form id="edit-form" class="product-form"><label>条码<input name="barcode" placeholder="已有条码" required></label><label>新名称<input name="name" required></label><label>新售价（元）<input name="price" type="number" min="0.01" step="0.01" required></label><button class="btn secondary" type="submit">只改名称和售价</button></form>
-            <form id="adjust-form" class="product-form"><label>条码<input name="barcode" placeholder="已有条码" required></label><label>数量增减<input name="delta" type="number" step="1" required></label><label>原因<select name="reason"><option>盘点修正</option><option>商品报损</option><option>到货入库</option></select></label><button class="btn secondary" type="submit">调整库存</button></form>
-            <div class="inline-note" id="product-status">重复条码会被拒绝。改价和上下架都不会改库存。</div>
-            <form id="catalog-filter" class="product-form"><label>查找条码或名称<input id="catalog-query" name="q" placeholder="输入一部分即可" autocomplete="off"></label><label>在售<select id="catalog-listing" name="listing"><option value="all">全部</option><option value="listed">上架</option><option value="unlisted">下架</option></select></label><label>低库存<input id="catalog-low-stock" type="checkbox">只看账面不超过阈值</label><button class="btn secondary" type="submit">筛选</button></form>
-            <div id="admin-catalog" class="events"></div></article>
-          <article class="surface"><div class="surface-heading"><div><h2>商品 CSV</h2><p>列是 barcode,name,price,stock。预览不改库存；坏行整表拒绝。权威仍是本库 SQLite。</p></div></div><input type="file" id="csv-file" accept=".csv,text/csv"><div class="actions"><button class="btn secondary" id="csv-preview" type="button">检查 CSV</button><button class="btn primary" id="csv-import" type="button">确认导入</button><button class="btn secondary" id="csv-export" type="button">导出当前商品</button></div><div id="csv-status" class="inline-note">导出与导入使用同一组列。产生订单后不能用 CSV 覆盖库存。</div><details><summary>查看示例格式</summary><pre>barcode,name,price,stock
+        <nav id="admin-nav" class="admin-nav" aria-label="工作台分区">
+          <a href="#admin-today">今日需要处理</a>
+          <a href="#admin-products">商品</a>
+          <a href="#admin-orders">订单</a>
+          <a href="#admin-holding">未付款占用</a>
+          <a href="#admin-help">求助</a>
+          <a href="#admin-backup">备份</a>
+          <a href="#admin-audit">操作记录</a>
+          <a href="#admin-door">门禁事件</a>
+          <a href="#admin-settings">设置</a>
+        </nav>
+        <section id="admin-today" class="admin-section">
+          <h2 class="admin-section-title">今日需要处理</h2>
+          <div class="metrics"><div class="metric"><span>已付订单（含模拟）</span><strong id="m-orders">—</strong></div><div class="metric"><span>模拟销售额（非真实资金）</span><strong id="m-sales">—</strong></div><div class="metric"><span>已验签金额（真实资金）</span><strong id="m-real">—</strong></div><div class="metric"><span>商品 SKU</span><strong id="m-products">—</strong></div><div class="metric"><span>进店动作</span><strong id="m-entries">—</strong></div></div>
+          <article class="surface" id="ops-summary"><div class="surface-heading"><div><h2>今日需要处理</h2><p>今日按门店时区的自然日，默认 Asia/Shanghai。低库存看账面数量。预留仍是未结算占用，不是第二套库存。</p></div></div><p id="today-summary" class="inline-note">登录后显示</p><p id="help-attention" class="inline-note">求助未结案：—</p><div id="low-stock-list" class="events"><p class="muted">没有达到阈值的商品</p></div></article>
+        </section>
+        <section id="admin-products" class="admin-section">
+          <h2 class="admin-section-title">商品</h2>
+          <div class="admin-grid">
+            <article class="surface"><div class="surface-heading"><div><h2>单品维护</h2><p>有订单后不能整表覆盖。新增、改价和库存调整都只写本库 SQLite。</p></div></div>
+              <form id="product-form" class="product-form"><label>条码<input name="barcode" placeholder="新条码" required></label><label>名称<input name="name" placeholder="商品名称" required></label><label>售价（元）<input name="price" type="number" min="0.01" step="0.01" required></label><label>期初库存<input name="stock" type="number" min="0" step="1" required></label><button class="btn primary" type="submit">新增商品</button></form>
+              <form id="edit-form" class="product-form"><label>条码<input name="barcode" placeholder="已有条码" required></label><label>新名称<input name="name" required></label><label>新售价（元）<input name="price" type="number" min="0.01" step="0.01" required></label><button class="btn secondary" type="submit">只改名称和售价</button></form>
+              <form id="adjust-form" class="product-form"><label>条码<input name="barcode" placeholder="已有条码" required></label><label>数量增减<input name="delta" type="number" step="1" required></label><label>原因<select name="reason"><option>盘点修正</option><option>商品报损</option><option>到货入库</option></select></label><button class="btn secondary" type="submit">调整库存</button></form>
+              <div class="inline-note" id="product-status">重复条码会被拒绝。改价和上下架都不会改库存。</div>
+              <form id="catalog-filter" class="product-form"><label>查找条码或名称<input id="catalog-query" name="q" placeholder="输入一部分即可" autocomplete="off"></label><label>在售<select id="catalog-listing" name="listing"><option value="all">全部</option><option value="listed">上架</option><option value="unlisted">下架</option></select></label><label>低库存<input id="catalog-low-stock" type="checkbox">只看账面不超过阈值</label><button class="btn secondary" type="submit">筛选</button></form>
+              <div id="admin-catalog" class="events"></div></article>
+            <article class="surface"><div class="surface-heading"><div><h2>商品 CSV</h2><p>列是 barcode,name,price,stock。预览不改库存；坏行整表拒绝。权威仍是本库 SQLite。</p></div></div><input type="file" id="csv-file" accept=".csv,text/csv"><div class="actions"><button class="btn secondary" id="csv-preview" type="button">检查 CSV</button><button class="btn primary" id="csv-import" type="button">确认导入</button><button class="btn secondary" id="csv-export" type="button">导出当前商品</button></div><div id="csv-status" class="inline-note">导出与导入使用同一组列。产生订单后不能用 CSV 覆盖库存。</div><details><summary>查看示例格式</summary><pre>barcode,name,price,stock
 6900000010001,演示商品,12.50,30</pre></details></article>
-        </div>
-        <article class="surface"><div class="surface-heading"><div><h2>占用库存的未付款订单</h2><p>只列出还在预留库存的未付款或支付中订单。关闭会释放预留，账面数量不变。外部支付中的订单不会在这里释放，也不会当成已完成的销售。</p></div></div><div id="holding-list" class="events"><p class="muted">登录后显示</p></div></article>
-        <article class="surface"><div class="surface-heading"><div><h2>订单</h2><p>默认是门店时区的今天。可改日期，或按完整订单编号查找。模拟销售额和已验签金额分开标注，模拟退款不是真实资金。</p></div><div class="actions"><button id="orders-export" class="btn secondary" type="button">导出 CSV</button><button id="refresh-admin" class="btn secondary" type="button">刷新</button></div></div><form id="order-filter" class="product-form"><label>门店日期<input id="order-date" name="date" type="date"></label><label>订单编号<input id="order-lookup" name="order_id" placeholder="完整订单编号" autocomplete="off"></label><button class="btn secondary" type="submit">查看</button></form><div id="order-lookup-status" class="inline-note">尚未查询</div><div id="order-export-status" class="inline-note">尚未导出</div><div class="table-wrap"><table><thead><tr><th>订单编号</th><th>状态</th><th>金额</th><th>资金</th><th>当地时间</th><th></th></tr></thead><tbody id="order-table"><tr><td colspan="6">尚无数据</td></tr></tbody></table></div></article>
-        <article class="surface"><div class="surface-heading"><div><h2>库存流水</h2><p>权威是本仓库 SQLite，不是 OSPOS 或 ERPNext</p></div></div><div id="ledger-balance" class="inline-note">登录后核对</div><div class="table-wrap"><table><thead><tr><th>条码</th><th>账面</th><th>预留</th><th>流水合计</th><th>核对</th></tr></thead><tbody id="ledger-table"><tr><td colspan="5">尚未加载</td></tr></tbody></table></div><ul id="ledger-moves" class="events"></ul></article>
-        <article class="surface"><div class="surface-heading"><div><h2>顾客求助</h2><p>确认或处理完成都不会开门，也不要求顾客付款才能离开。</p></div></div><div id="help-list" class="events"><p class="muted">没有求助</p></div></article>
-        <article class="surface"><div class="surface-heading"><div><h2>虚拟进门记录</h2><p id="door-lock-note">实体门未打开</p></div></div><div id="door-event-list" class="events"><p class="muted">没有虚拟进门记录</p></div></article>
-        <article class="surface"><div class="surface-heading"><div><h2>管理操作记录</h2><p>只追加，不能修改或删除。记录本身不改库存、不开门、不收款。</p></div></div><div id="audit-list" class="events"><p class="muted">没有操作记录</p></div></article>
-        <article class="surface"><div class="surface-heading"><div><h2>设备与异常记录</h2><p>Frigate 检测人员事件 ≠ 偷盗判断</p></div></div><div id="event-list" class="events"><p class="muted">没有事件</p></div></article>
+          </div>
+          <article class="surface"><div class="surface-heading"><div><h2>库存流水</h2><p>权威是本仓库 SQLite，不是 OSPOS 或 ERPNext</p></div></div><div id="ledger-balance" class="inline-note">登录后核对</div><div class="table-wrap"><table><thead><tr><th>条码</th><th>账面</th><th>预留</th><th>流水合计</th><th>核对</th></tr></thead><tbody id="ledger-table"><tr><td colspan="5">尚未加载</td></tr></tbody></table></div><ul id="ledger-moves" class="events"></ul></article>
+        </section>
+        <section id="admin-orders" class="admin-section">
+          <h2 class="admin-section-title">订单</h2>
+          <article class="surface"><div class="surface-heading"><div><h2>订单</h2><p>默认是门店时区的今天。可改日期，或按完整订单编号查找。模拟销售额和已验签金额分开标注，模拟退款不是真实资金。</p></div><div class="actions"><button id="orders-export" class="btn secondary" type="button">导出 CSV</button><button id="refresh-admin" class="btn secondary" type="button">刷新</button></div></div><form id="order-filter" class="product-form"><label>门店日期<input id="order-date" name="date" type="date"></label><label>订单编号<input id="order-lookup" name="order_id" placeholder="完整订单编号" autocomplete="off"></label><button class="btn secondary" type="submit">查看</button></form><div id="order-lookup-status" class="inline-note">尚未查询</div><div id="order-export-status" class="inline-note">尚未导出</div><div class="table-wrap"><table><thead><tr><th>订单编号</th><th>状态</th><th>金额</th><th>资金</th><th>当地时间</th><th></th></tr></thead><tbody id="order-table"><tr><td colspan="6">尚无数据</td></tr></tbody></table></div></article>
+        </section>
+        <section id="admin-holding" class="admin-section">
+          <h2 class="admin-section-title">未付款占用</h2>
+          <article class="surface"><div class="surface-heading"><div><h2>占用库存的未付款订单</h2><p>只列出还在预留库存的未付款或支付中订单。关闭会释放预留，账面数量不变。外部支付中的订单不会在这里释放，也不会当成已完成的销售。</p></div></div><div id="holding-list" class="events"><p class="muted">登录后显示</p></div></article>
+        </section>
+        <section id="admin-help" class="admin-section">
+          <h2 class="admin-section-title">求助</h2>
+          <article class="surface"><div class="surface-heading"><div><h2>顾客求助</h2><p>确认或处理完成都不会开门，也不要求顾客付款才能离开。</p></div></div><div id="help-list" class="events"><p class="muted">没有求助</p></div></article>
+        </section>
+        <section id="admin-backup" class="admin-section">
+          <h2 class="admin-section-title">备份</h2>
+          <article class="surface"><div class="surface-heading"><div><h2>数据库备份</h2><p>在线备份可下载。上传只做隔离预览，不会替换正在使用的库，也不会开门或收款。</p></div></div><button id="backup-download" class="btn secondary" type="button">下载备份</button><form id="restore-preview-form" class="product-form"><label>备份文件<input id="restore-file" name="backup" type="file" accept=".sqlite3,.db,application/vnd.sqlite3" required></label><button class="btn secondary" type="submit">隔离恢复预览</button></form><div id="restore-report" class="inline-note">尚未备份</div></article>
+        </section>
+        <section id="admin-audit" class="admin-section">
+          <h2 class="admin-section-title">操作记录</h2>
+          <article class="surface"><div class="surface-heading"><div><h2>管理操作记录</h2><p>只追加，不能修改或删除。记录本身不改库存、不开门、不收款。</p></div></div><div id="audit-list" class="events"><p class="muted">没有操作记录</p></div></article>
+        </section>
+        <section id="admin-door" class="admin-section">
+          <h2 class="admin-section-title">门禁事件</h2>
+          <article class="surface"><div class="surface-heading"><div><h2>虚拟进门记录</h2><p id="door-lock-note">实体门未打开</p></div></div><div id="door-event-list" class="events"><p class="muted">没有虚拟进门记录</p></div></article>
+          <article class="surface"><div class="surface-heading"><div><h2>设备与异常记录</h2><p>Frigate 检测人员事件 ≠ 偷盗判断</p></div></div><div id="event-list" class="events"><p class="muted">没有事件</p></div></article>
+        </section>
+        <section id="admin-settings" class="admin-section">
+          <h2 class="admin-section-title">设置</h2>
+          <article class="surface"><div class="surface-heading"><div><h2>门店设置</h2><p>低库存阈值和门店时区。保存不会开门，也不会收款。</p></div></div><form id="store-settings-form" class="product-form"><label>低库存阈值<input id="low-stock-threshold" name="threshold" type="number" min="1" max="10000" required></label><label>门店时区<input id="store-timezone" name="timezone" required placeholder="Asia/Shanghai"></label><button class="btn secondary" type="submit">保存门店设置</button></form><div id="store-settings-status" class="inline-note">尚未修改</div></article>
+          <article class="surface invite-panel"><div class="surface-heading"><div><h2>员工签发结账邀请码</h2>
+            <p>仅限有人营业的试点；不授权真实门禁，不代表身份核验。</p></div><button id="issue-invite" class="btn secondary">创建2分钟邀请码</button></div>
+            <div id="invite-result" class="inline-note">尚未生成</div><img id="invite-qr" class="qr-code" alt="试点结账二维码" hidden></article>
+          <div class="admin-grid">
+            <article class="surface"><div class="surface-heading"><div><h2>营业模式</h2><p>试点只允许有人模式；不控制实际营业门</p></div></div><div class="mode-options"><button id="mode-staffed" class="mode-btn">☀️ 有人经营</button><button id="mode-unattended" class="mode-btn">🌙 无人值守</button></div><div class="inline-note" id="mode-info">当前模式：—</div></article>
+            <article class="surface"><div class="surface-heading"><div><h2>集成连接状态</h2><p>真实门禁保持关闭；视频桥接需单独部署</p></div></div><div class="integrations"><div><b>Home Assistant</b><span id="ha-state">未启用</span></div><div><b>Frigate MQTT</b><span>可选桥接进程</span></div><div><b>支付与实际门禁</b><span class="status-warning">现场验收前禁用</span></div><div><b>OSPOS / ERPNext</b><span>CSV / 只读适配</span></div></div></article>
+          </div>
+        </section>
       </div>
     </section>
     <footer class="footer">OpenRetail V2 · 演示工程 · 使用前请阅读 README 与实际营业安全限制</footer>
