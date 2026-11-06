@@ -27,17 +27,20 @@ async function cameraScan(){if(state.scanner){stopCamera();$('camera-btn').textC
 async function tryScan(){const code=$('barcode').value.trim();let info;try{info=await api('/api/products/by-barcode/'+encodeURIComponent(code))}catch(e){$('scan-hint').textContent=e.message;toast(e.message);return}if(!state.products.some(p=>p.id===info.id))await loadProducts();add(info.id);$('barcode').value='';$('scan-hint').textContent='已添加 '+info.name;toast('已添加 '+info.name)}
 function describePayment(order){
  if(!order||!order.status)return {text:'尚未创建订单',cls:''};
- if(order.status==='PAID'&&order.payment_kind==='MOCK_NOT_REAL_MONEY')return {text:'模拟支付成功 · 非真实扣款 · 已扣库存 · '+money(order.total_cents),cls:'mock-paid'};
+ if(order.status==='PAID'&&order.payment_kind==='MOCK_NOT_REAL_MONEY')return {text:'模拟支付成功 · 非真实资金 · 已扣库存 · '+money(order.total_cents),cls:'mock-paid'};
  if(order.status==='PAID'&&order.real_money)return {text:'已验签付款 · '+money(order.total_cents),cls:'mock-paid'};
- if(order.status==='EXPIRED')return {text:'已超时 · 未付款 · 预留已释放，请重新下单',cls:'timeout'};
- if(order.status==='CANCELLED')return {text:'已取消 · 未付款 · 预留已释放',cls:'timeout'};
- if(order.status==='REFUNDED')return {text:'演示库存已由店员退回',cls:''};
- if(order.status==='PAYMENT_REVIEW')return {text:'待人工核对 · 请勿重复付款',cls:'timeout'};
- if(order.status==='PENDING'||order.status==='PAYMENT_PENDING')return {text:'未付款 · 库存已预留 · 订单 '+(order.id||'').slice(0,10)+' · '+money(order.total_cents),cls:'unpaid'};
+ if(order.status==='EXPIRED')return {text:'已超时 · 未付款 · 订单 '+(order.id||'')+' · 预留已释放，请重新下单',cls:'timeout'};
+ if(order.status==='CANCELLED')return {text:'已取消 · 未付款 · 订单 '+(order.id||'')+' · 预留已释放',cls:'timeout'};
+ if(order.status==='REFUNDED')return {text:'演示库存已由店员退回 · 订单 '+(order.id||''),cls:''};
+ if(order.status==='PAYMENT_REVIEW')return {text:'待人工核对 · 请勿重复付款 · 订单 '+(order.id||''),cls:'timeout'};
+ if(order.status==='PENDING'||order.status==='PAYMENT_PENDING')return {text:'未付款 · 库存已预留 · 订单 '+(order.id||'')+' · '+money(order.total_cents),cls:'unpaid'};
  return {text:order.status,cls:''};
 }
-function showPay(order){const box=$('payment-result');const view=describePayment(order);box.textContent=view.text;box.className='inline-note pay-banner'+(view.cls?' '+view.cls:'')}
-async function refreshMine(){if(!state.token){$('my-orders').innerHTML='<p class="muted">还没有订单</p>';return}const rows=await api('/api/orders',{guest:true});$('my-orders').innerHTML=rows.length?rows.map(o=>{const view=describePayment(o);return `<article class="${esc(view.cls)}"><b>${esc(view.text.split('·')[0].trim())}</b><div>${money(o.total_cents)} · ${time(o.created_at)}</div><small>${esc(o.payment_kind)} · verified=${o.verified} · real_money=${o.real_money?'true':'false'}</small></article>`}).join(''):'<p class="muted">还没有订单</p>'}
+function itemSummary(order){if(order.items)return order.items;return (order.lines||[]).map(line=>line.name+' x'+line.quantity).join('、')}
+function moneyNote(order){if(order.status==='PAID'&&order.payment_kind==='MOCK_NOT_REAL_MONEY')return '非真实资金 · MOCK_NOT_REAL_MONEY · real_money=false';if(order.real_money)return '已验签真实资金 · real_money=true';if(order.status==='EXPIRED'||order.status==='CANCELLED')return '未付款 · real_money=false';return '未付款 · real_money=false'}
+function showReceipt(order){const card=$('receipt');if(!card)return;if(!order||!order.id){card.hidden=true;return}card.hidden=false;$('receipt-status').textContent=describePayment(order).text;$('receipt-id').value=order.id;$('receipt-items').textContent=itemSummary(order)||'无商品明细';$('receipt-amount').textContent=money(order.total_cents);$('receipt-money').textContent=moneyNote(order)}
+function showPay(order){const box=$('payment-result');const view=describePayment(order);box.textContent=view.text;box.className='inline-note pay-banner'+(view.cls?' '+view.cls:'');showReceipt(order)}
+async function refreshMine(){if(!state.token){$('my-orders').innerHTML='<p class="muted">还没有订单</p>';return}const rows=await api('/api/orders',{guest:true});$('my-orders').innerHTML=rows.length?rows.map(o=>{const view=describePayment(o);return `<article class="${esc(view.cls)}"><b>${esc(view.text.split('·')[0].trim())}</b><div class="receipt-id">${esc(o.id)}</div><div>${esc(itemSummary(o))}</div><div>${money(o.total_cents)} · ${time(o.created_at)}</div><small>${esc(moneyNote(o))} · verified=${o.verified}</small></article>`}).join(''):'<p class="muted">还没有订单</p>';if(rows[0])showReceipt(rows[0])}
 async function showEntryStatus(){const status=await api('/api/entry/status',{guest:true});const latest=status.events[0];$('entry-status').textContent='实体门未打开 · physical_door_opened=false · 虚拟事件 '+(latest?latest.result+' / '+latest.detail:'无')}
 async function createOrder(){if(!state.token)throw Error('先创建访客会话');const req={request_id:(crypto.randomUUID?.()||('demo-'+Date.now()+'-'+Math.random())),lines:[...state.cart].map(([product_id,quantity])=>({product_id,quantity}))};const r=await api('/api/orders',{method:'POST',body:req,guest:true});state.orderId=r.id;$('cancel-order-btn').disabled=false;$('pay-btn').disabled=state.paymentProvider==='DISABLED';$('payment-qr').hidden=true;showPay(r);await refreshMine();return r}
 async function confirmMock(){const r=await api('/api/payments/mock-confirm',{method:'POST',body:{order_id:state.orderId},guest:true});showPay(r);if(r.status==='PAID'){state.cart.clear();state.orderId='';$('cancel-order-btn').disabled=true;$('pay-btn').disabled=true;await loadProducts()}await refreshMine();return r}
@@ -61,6 +64,7 @@ $('pay-btn').onclick=()=>run(async()=>{if(!state.orderId)throw Error('尚无待�
  if(state.paymentProvider!=='MOCK_ONLY')throw Error('没有配置可用的收款渠道');
  const r=await confirmMock();
  toast(r.status==='PAID'?'模拟支付完成（没有真实资金流转）':describePayment(r).text)});
+$('receipt-copy').onclick=()=>run(async()=>{const id=$('receipt-id').value;if(!id)throw Error('还没有订单编号');$('receipt-id').focus();$('receipt-id').select();try{await navigator.clipboard.writeText(id);toast('订单编号已复制')}catch{toast('订单编号已选中，可手动复制')}});
 $('cart-pay').onclick=()=>run(async()=>{if(state.paymentProvider==='WECHAT_NATIVE'){if(!state.orderId)await createOrder();$('pay-btn').click();return}if(state.paymentProvider!=='MOCK_ONLY')throw Error('没有配置可用的收款渠道');if(!state.orderId)await createOrder();const r=await confirmMock();toast(r.status==='PAID'?'模拟支付完成（没有真实资金流转）':describePayment(r).text)});
 $('redeem-btn').onclick=()=>run(async()=>{
  const invite=$('invite-token').value.trim();const r=await api('/api/entry/redeem',{method:'POST',body:{invite}});

@@ -68,6 +68,8 @@ def test_guest_order_history_separates_mock_unpaid_and_timeout(client):
     assert created.status_code==201
     pending=client.get('/api/orders',headers=first).json()
     assert pending[0]['status']=='PENDING' and pending[0]['payment_kind']=='UNPAID'
+    assert pending[0]['id']==created.json()['id']
+    assert product['name'] in pending[0]['items']
     assert pending[0]['real_money'] is False and pending[0]['verified']==0
     assert client.get('/api/orders',headers=second).json()==[]
     paid=client.post('/api/payments/mock-confirm',headers=first,json={'order_id':created.json()['id']})
@@ -75,15 +77,32 @@ def test_guest_order_history_separates_mock_unpaid_and_timeout(client):
     assert paid.json()['payment_kind']=='MOCK_NOT_REAL_MONEY' and paid.json()['verified']==0
     assert paid.json()['real_money'] is False
     again=client.get('/api/orders',headers=first).json()[0]
-    assert again['payment_kind']=='MOCK_NOT_REAL_MONEY' and again['status']=='PAID'
+    assert again['id']==created.json()['id'] and again['status']=='PAID'
+    assert again['payment_kind']=='MOCK_NOT_REAL_MONEY' and again['verified']==0 and again['real_money'] is False
+    assert product['name'] in again['items'] and ' x1' in again['items']
+    with client.app.state.db.connect() as conn:
+        stock=conn.execute('SELECT COALESCE(SUM(stock),0) n FROM products').fetchone()['n']
+        movements=conn.execute('SELECT COUNT(*) n FROM stock_movements').fetchone()['n']
+        payments=conn.execute('SELECT COUNT(*) n FROM payments').fetchone()['n']
+        doors=conn.execute('SELECT COUNT(*) n FROM door_events').fetchone()['n']
+    reread=client.get('/api/orders',headers=first).json()[0]
+    assert reread==again
+    with client.app.state.db.connect() as conn:
+        assert conn.execute('SELECT COALESCE(SUM(stock),0) n FROM products').fetchone()['n']==stock
+        assert conn.execute('SELECT COUNT(*) n FROM stock_movements').fetchone()['n']==movements
+        assert conn.execute('SELECT COUNT(*) n FROM payments').fetchone()['n']==payments
+        assert conn.execute('SELECT COUNT(*) n FROM door_events').fetchone()['n']==doors
+    shop=open('web/index.html',encoding='utf-8').read().split('id="panel-admin"',1)[0]
+    assert '退款' not in shop and 'refund' not in shop.lower()
     auth=visitor(client)
     expiring=client.post('/api/orders',headers=auth,json={'request_id':'customer-timeout-0002',
         'lines':[{'product_id':product['id'],'quantity':1}]}).json()
     with client.app.state.db.tx() as conn:
         conn.execute('UPDATE orders SET expires_at=0 WHERE id=?',(expiring['id'],))
     timed=client.get('/api/orders',headers=auth).json()[0]
+    assert timed['id']==expiring['id']
     assert timed['status']=='EXPIRED' and timed['payment_kind']=='TIMEOUT_UNPAID'
-    assert timed['real_money'] is False
+    assert timed['real_money'] is False and product['name'] in timed['items']
     assert client.post('/api/orders/'+paid.json()['id']+'/refund',headers=first).status_code==404
 
 

@@ -269,7 +269,8 @@ def create_app(settings:Settings|None=None)->FastAPI:
         lines=[asdict(r) for r in c.execute(
             'SELECT product_id,barcode,name,unit_price_cents,quantity FROM order_lines WHERE order_id=?',
             (order_id,))]
-        return {**asdict(row),'lines':lines,**payment_facts(c,order_id,row['status'])}
+        items='、'.join(f"{line['name']} x{line['quantity']}" for line in lines)
+        return {**asdict(row),'lines':lines,'items':items,**payment_facts(c,order_id,row['status'])}
 
     def record_virtual_door(c,session_id,result,detail):
         c.execute('''INSERT INTO door_events(session_id,result,provider,detail,created_at)

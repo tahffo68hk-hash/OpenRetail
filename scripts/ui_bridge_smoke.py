@@ -50,6 +50,7 @@ with TestClient(create_app(cfg)) as backend,sync_playwright() as pw:
  print('paid:',p.locator('#payment-result').inner_text())
  p.wait_for_function("document.querySelector('#my-orders').textContent.includes('模拟支付成功')")
  p.wait_for_function("document.querySelector('#my-orders').textContent.includes('real_money=false')")
+ p.wait_for_function("(()=>{const id=document.querySelector('#receipt-id').value;const card=document.querySelector('#receipt').textContent;const mine=document.querySelector('#my-orders').textContent;return id.length>=16&&card.includes('非真实资金')&&card.includes('MOCK_NOT_REAL_MONEY')&&card.includes('瓶装饮用水')&&mine.includes(id)&&mine.includes('¥2.00')&&mine.includes('非真实资金')})()")
  p.wait_for_function("document.querySelector('#entry-status').textContent.includes('实体门未打开')")
  assert 'refund' not in p.locator('#panel-shop').inner_text().lower()
  assert '退款' not in p.locator('#panel-shop').inner_text()
