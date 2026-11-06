@@ -64,7 +64,7 @@ def test_today_orders_and_csv_keep_mock_money_separate(client, admin_header):
     assert 'A'*10 not in text
     assert 'mchid' not in text.lower() and 'api_key' not in text.lower()
     audit=client.get('/api/admin/audit', headers=admin_header).json()
-    assert ('ORDERS_EXPORTED','count=1;timezone=Asia/Shanghai','demo-admin-key') in {
+    assert ('ORDERS_EXPORTED',f'count=1;timezone=Asia/Shanghai;date={local_day.isoformat()}','demo-admin-key') in {
         (row['action'], row['detail'], row['actor']) for row in audit['events']}
     with client.app.state.db.connect() as conn:
         assert conn.execute('SELECT COALESCE(SUM(stock),0) n FROM products').fetchone()['n']==stock

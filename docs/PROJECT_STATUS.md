@@ -4,6 +4,19 @@
 
 完全无人值守经营仍是 **NOT_APPROVED**。示例配置里的真实支付和实体开锁都是关闭的。
 
+## 本增量（按门店日期看订单，并按编号查找）
+
+已在代码和测试里做到，并在本机复跑：
+
+- 仍是原来的订单表和 `GET /api/admin/orders.csv`。可选一个门店当地日期，缺省是 `store_settings.store_timezone`（默认 `Asia/Shanghai`）的今天。窗口和今日摘要一样：带时区的本地零点到下一个本地零点，用 UTC 纪元秒比较。上海时间当天 01:00 属于这一天；没选中的另一天不会出现。
+- 按完整订单编号精确查找。找到的订单用同一组字段：编号、当地时间、金额、状态、商品摘要、资金标签。模拟付款是 `MOCK_NOT_REAL_MONEY`，`verified` 为 0。不存在的编号返回 404「订单不存在」，不是空的成功结果。编号和日期对不上时返回 404，不会把别的日期混进来。
+- CSV 列仍是 `order_id,local_time,timezone,status,amount_yuan,payment_label,real_money,items`。按日期导出只含那一天；按编号导出只含那一张。成功导出追加 `ORDERS_EXPORTED`，内容是条数、时区和日期。没有密钥。
+- 未登录的列表、查找和导出返回 401。这些请求不改库存、不开门、不调用支付机构。演示里的已验签金额仍是 0。
+
+`/tmp/openretail-venv/bin/python -m pytest -q`（工作目录 `/workspace`，Python 3.12.3）：**60 passed，1 warning，6.18s，退出码 0**。警告仍是 Starlette 的 `httpx` TestClient 弃用提示。60 = 上一轮 59 + 本增量 1。
+
+`scripts/ui_bridge_smoke.py` 在去掉密钥环境变量后退出码 0。模拟支付 ¥2.00 之后，日期框有门店当天的日期。用表格里的订单编号查找后，状态含「已找到订单」和「非真实资金」，表格仍含「¥2.00」。导出状态含「已导出该订单」和「非真实资金」。390 宽 `scrollWidth` 390，1440 宽 `scrollWidth` 1440，`pageerror` 为空。脚本没有做浏览器内的时间穿越；昨天和 01:00 边界由 pytest 固定时间戳覆盖。这仍是 Chrome 到 TestClient 的桥，不是真机，也不是真实收款。
+
 ## 本增量（管理端商品查找和筛选）
 
 已在代码和测试里做到，并在本机复跑：

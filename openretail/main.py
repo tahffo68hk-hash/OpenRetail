@@ -10,7 +10,7 @@ import sys
 import base64
 import shutil
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 import io
 import qrcode
@@ -76,22 +76,63 @@ def payment_label(provider,verified,status):
         return 'MOCK_REFUND_NOT_REAL_MONEY',False
     return 'UNPAID',False
 
-def today_order_rows(c,zone_name,zone,day_start):
-    rows=c.execute('''SELECT o.id,o.status,o.total_cents,o.created_at,o.paid_at,
+ORDER_SELECT='''SELECT o.id,o.status,o.total_cents,o.created_at,o.paid_at,
         (SELECT provider FROM payments WHERE order_id=o.id ORDER BY created_at DESC LIMIT 1) provider,
         (SELECT verified FROM payments WHERE order_id=o.id ORDER BY created_at DESC LIMIT 1) verified,
         (SELECT group_concat(name || ' x' || quantity, '、') FROM order_lines WHERE order_id=o.id) items
-        FROM orders o WHERE o.created_at>=? ORDER BY o.created_at DESC''',(day_start,)).fetchall()
-    listed=[]
+        FROM orders o'''
+
+def local_day_bounds(zone:ZoneInfo, day)->tuple[int,int]:
+    # Half-open local day. 01:00 belongs to that date; the next local midnight does not.
+    start=datetime(day.year,day.month,day.day,tzinfo=zone)
+    end=start+timedelta(days=1)
+    return int(start.timestamp()),int(end.timestamp())
+
+def parse_store_date(text, zone:ZoneInfo):
+    raw='' if text is None else str(text).strip()
+    if not raw:return datetime.now(zone).date()
+    try:return datetime.strptime(raw,'%Y-%m-%d').date()
+    except ValueError:abort(422,'日期应为 YYYY-MM-DD')
+
+def present_order(row,zone_name,zone):
+    label,real=payment_label(row['provider'],row['verified'],row['status'])
+    return {'id':row['id'],'local_time':format_local(row['created_at'],zone),'timezone':zone_name,
+            'status':row['status'],'total_cents':row['total_cents'],
+            'amount_yuan':f"{row['total_cents']/100:.2f}",'provider':row['provider'],
+            'verified':0 if row['verified'] is None else int(row['verified']),
+            'money_label':label,'real_money':real,'items':row['items'] or '',
+            'created_at':row['created_at'],'paid_at':row['paid_at']}
+
+def orders_between(c,zone_name,zone,start,end):
+    rows=c.execute(ORDER_SELECT+' WHERE o.created_at>=? AND o.created_at<? ORDER BY o.created_at DESC',(start,end)).fetchall()
+    return [present_order(row,zone_name,zone) for row in rows]
+
+def select_orders(c,zone_name,zone,date_text,order_id):
+    """One store-local date, or exactly one order. Never a mix of other days."""
+    needle='' if order_id is None else str(order_id).strip()
+    if needle:
+        if len(needle)>64:abort(422,'订单编号不正确')
+        row=c.execute(ORDER_SELECT+' WHERE o.id=?',(needle,)).fetchone()
+        if not row:abort(404,'订单不存在')
+        found=present_order(row,zone_name,zone)
+        order_day=found['local_time'][:10]
+        if date_text and str(date_text).strip() and parse_store_date(date_text,zone).isoformat()!=order_day:
+            abort(404,'该日期没有这张订单')
+        day=datetime.strptime(order_day,'%Y-%m-%d').date()
+        start,end=local_day_bounds(zone,day)
+        return order_day,start,end,[found]
+    day=parse_store_date(date_text,zone)
+    start,end=local_day_bounds(zone,day)
+    return day.isoformat(),start,end,orders_between(c,zone_name,zone,start,end)
+
+def orders_csv(rows)->str:
+    buf=io.StringIO()
+    writer=csv.writer(buf,lineterminator='\n')
+    writer.writerow(['order_id','local_time','timezone','status','amount_yuan','payment_label','real_money','items'])
     for row in rows:
-        label,real=payment_label(row['provider'],row['verified'],row['status'])
-        listed.append({'id':row['id'],'local_time':format_local(row['created_at'],zone),'timezone':zone_name,
-                       'status':row['status'],'total_cents':row['total_cents'],
-                       'amount_yuan':f"{row['total_cents']/100:.2f}",'provider':row['provider'],
-                       'verified':0 if row['verified'] is None else int(row['verified']),
-                       'money_label':label,'real_money':real,'items':row['items'] or '',
-                       'created_at':row['created_at'],'paid_at':row['paid_at']})
-    return listed
+        writer.writerow([row['id'],row['local_time'],row['timezone'],row['status'],row['amount_yuan'],
+                         row['money_label'],'true' if row['real_money'] else 'false',row['items']])
+    return buf.getvalue()
 def abort(status:int,message:str):raise HTTPException(status_code=status,detail=message)
 def asdict(row):return dict(row) if row is not None else None
 
@@ -1040,38 +1081,33 @@ def create_app(settings:Settings|None=None)->FastAPI:
                         headers={'Content-Disposition':'attachment; filename="openretail-products.csv"'})
 
     @app.get('/api/admin/orders')
-    def admin_orders(today:bool=Query(default=False), actor:str=Depends(admin)):
+    def admin_orders(today:bool=Query(default=False), date:str|None=Query(default=None),
+                     order_id:str|None=Query(default=None), actor:str=Depends(admin)):
         with db.connect() as c:
-            if not today:
+            if not today and not (date and str(date).strip()) and not (order_id and str(order_id).strip()):
                 return [asdict(x) for x in c.execute('''SELECT o.id,o.status,o.total_cents,o.created_at,o.paid_at,o.expires_at,
                         (SELECT provider FROM payments WHERE order_id=o.id ORDER BY created_at DESC LIMIT 1) provider,
                         (SELECT verified FROM payments WHERE order_id=o.id ORDER BY created_at DESC LIMIT 1) verified
                         FROM orders o ORDER BY o.created_at DESC LIMIT 100''')]
             zone_name,zone=store_zone(c)
-            day_start=local_day_start(zone)
-            rows=today_order_rows(c,zone_name,zone,day_start)
-        return {'timezone':zone_name,'local_day_start':day_start,'orders':rows,
-                'physical_door_opened':False,'payment_required_to_leave':False,'real_door_enabled':False}
+            local_date,day_start,day_end,rows=select_orders(c,zone_name,zone,date,order_id)
+        return {'timezone':zone_name,'local_date':local_date,'local_day_start':day_start,'local_day_end':day_end,
+                'orders':rows,'physical_door_opened':False,'payment_required_to_leave':False,'real_door_enabled':False}
 
     @app.get('/api/admin/orders.csv')
-    def export_today_orders(actor:str=Depends(admin)):
-        """CSV of today's orders in the store timezone. Does not change stock or take payment."""
+    def export_today_orders(date:str|None=Query(default=None), order_id:str|None=Query(default=None),
+                            actor:str=Depends(admin)):
+        """CSV of one store-local date, or one order. Does not change stock or take payment."""
         with db.connect() as c:
             zone_name,zone=store_zone(c)
-            day_start=local_day_start(zone)
-            rows=today_order_rows(c,zone_name,zone,day_start)
+            local_date,day_start,day_end,rows=select_orders(c,zone_name,zone,date,order_id)
             stock_before=c.execute('SELECT COALESCE(SUM(stock),0) n FROM products').fetchone()['n']
-            db.audit(c,actor,'ORDERS_EXPORTED',f'count={len(rows)};timezone={zone_name}')
+            db.audit(c,actor,'ORDERS_EXPORTED',f'count={len(rows)};timezone={zone_name};date={local_date}')
             stock_after=c.execute('SELECT COALESCE(SUM(stock),0) n FROM products').fetchone()['n']
         if stock_before!=stock_after:raise RuntimeError('order export changed stock')
-        buf=io.StringIO()
-        writer=csv.writer(buf,lineterminator='\n')
-        writer.writerow(['order_id','local_time','timezone','status','amount_yuan','payment_label','real_money','items'])
-        for row in rows:
-            writer.writerow([row['id'],row['local_time'],row['timezone'],row['status'],row['amount_yuan'],
-                             row['money_label'],'true' if row['real_money'] else 'false',row['items']])
-        return Response(buf.getvalue(),media_type='text/csv; charset=utf-8',headers={
-            'Content-Disposition':'attachment; filename="openretail-orders-today.csv"',
+        filename=f'openretail-orders-{local_date}.csv'
+        return Response(orders_csv(rows),media_type='text/csv; charset=utf-8',headers={
+            'Content-Disposition':f'attachment; filename="{filename}"',
             'X-OpenRetail-Live-Replaced':'false'})
 
     @app.get('/api/admin/help-requests',dependencies=[Depends(admin)])
