@@ -4,6 +4,20 @@
 
 完全无人值守经营仍是 **NOT_APPROVED**。示例配置里的真实支付和实体开锁都是关闭的。
 
+## 本增量（管理操作审计）
+
+已在代码和测试里做到，并在本机复跑：
+
+- 复用已有的 `audit_events` 表，没有把这些记录塞进虚拟门禁事件。
+- 新增、改价、库存调整、上架、下架、模拟退款、求助确认/处理、门店时区与低库存阈值、备份下载、隔离恢复预览都会追加一行。字段是时间、动作、目标条码或编号、以及现有管理员身份（演示密钥登录记为 `demo-admin-key`，密码会话记为 `operator`）。不记录密钥、备份内容和支付凭证。
+- `GET /api/admin/audit` 需要管理员身份，未登录返回 401。没有修改或删除接口；对不存在的删除路径返回 404，记录仍在。
+- 下架不改库存。库存调整只改变调整数量本身。审计响应里 `physical_door_opened=false`，`payment_required_to_leave=false`。
+- 管理页登录后能看到最近的操作记录。
+
+`/tmp/openretail-venv/bin/python -m pytest -q`（工作目录 `/workspace`，Python 3.12.3）：**57 passed，1 warning，5.91s，退出码 0**。警告仍是 Starlette 的 `httpx` TestClient 弃用提示。57 = 上一轮 56 + 本增量 1。
+
+`scripts/ui_bridge_smoke.py` 在去掉密钥环境变量后退出码 0。下架条码 `6900000099991` 之后，操作记录含 `PRODUCT_UNLISTED` 和该条码。390 宽 `scrollWidth` 390，1440 宽 `scrollWidth` 1440，`pageerror` 为空。这仍是 Chrome 到 TestClient 的桥，不是真机。
+
 ## 本增量（单品上架 / 下架）
 
 已在代码和测试里做到，并在本机复跑：

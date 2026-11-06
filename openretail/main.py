@@ -581,8 +581,8 @@ def create_app(settings:Settings|None=None)->FastAPI:
             return mock_body(order_id=order_id,trade_state=mock_trade_state(row,payment),
                              order_status=row['status'],expired_last_check=expired)
 
-    @app.post('/api/admin/orders/{order_id}/mock-refund',dependencies=[Depends(admin)])
-    def mock_refund(order_id:str):
+    @app.post('/api/admin/orders/{order_id}/mock-refund')
+    def mock_refund(order_id:str, actor:str=Depends(admin)):
         """Restore SQLite stock for an unverified mock sale. No provider refund exists."""
         mock_enabled()
         with db.tx() as c:
@@ -607,7 +607,7 @@ def create_app(settings:Settings|None=None)->FastAPI:
             if cur.rowcount!=1:raise RuntimeError('mock refund lost the paid row')
             c.execute('INSERT INTO refunds(id,order_id,provider,amount_cents,created_at) VALUES(?,?,?,?,?)',
                       ('mock_refund_'+order_id,order_id,'MOCK_NOT_REAL_MONEY',row['total_cents'],now()))
-            db.audit(c,'operator','MOCK_REFUND',order_id)
+            db.audit(c,actor,'MOCK_REFUND',order_id)
             return mock_body(order_id=order_id,outcome='REFUNDED',trade_state='REFUND',
                              order_status='REFUNDED',stock_restored=True)
 
@@ -801,8 +801,8 @@ def create_app(settings:Settings|None=None)->FastAPI:
             db.audit(c,'operator','MODE_SET',payload.mode)
         return {'mode':payload.mode,'physical_door_affected':False}
 
-    @app.put('/api/admin/store-settings',dependencies=[Depends(admin)])
-    def update_store_settings(payload:StoreSettingsInput):
+    @app.put('/api/admin/store-settings')
+    def update_store_settings(payload:StoreSettingsInput, actor:str=Depends(admin)):
         """Staff threshold and business-day timezone. No door or payment side effects."""
         if payload.low_stock_threshold is None and payload.timezone is None:
             abort(422,'请提供低库存阈值或门店时区')
@@ -815,7 +815,7 @@ def create_app(settings:Settings|None=None)->FastAPI:
             if payload.timezone is not None:
                 c.execute('''INSERT INTO store_settings(key,value) VALUES('store_timezone',?)
                              ON CONFLICT(key) DO UPDATE SET value=excluded.value''',(payload.timezone,))
-            db.audit(c,'operator','STORE_SETTINGS',
+            db.audit(c,actor,'STORE_SETTINGS',
                      f"threshold={payload.low_stock_threshold};timezone={payload.timezone or ''}")
             threshold=int(c.execute("SELECT value FROM store_settings WHERE key='low_stock_threshold'").fetchone()['value'])
             zone_name=c.execute("SELECT value FROM store_settings WHERE key='store_timezone'").fetchone()['value']
@@ -826,8 +826,8 @@ def create_app(settings:Settings|None=None)->FastAPI:
     def admin_products():
         with db.connect() as c:return [asdict(r) for r in c.execute('SELECT * FROM products ORDER BY id')]
 
-    @app.post('/api/admin/products',dependencies=[Depends(admin)])
-    def create_product(payload:ProductInput):
+    @app.post('/api/admin/products')
+    def create_product(payload:ProductInput, actor:str=Depends(admin)):
         """Add one SQLite catalog row. Duplicate barcodes are not an overwrite."""
         with db.tx() as c:
             db.expire(c,now())
@@ -836,27 +836,27 @@ def create_app(settings:Settings|None=None)->FastAPI:
             cur=c.execute('INSERT INTO products(barcode,name,price_cents,stock,active) VALUES(?,?,?,?,?)',
                           (payload.barcode,payload.name,payload.price_cents,payload.stock,int(payload.active)))
             db.movement(c,cur.lastrowid,payload.stock,0,'OPENING_BALANCE',payload.barcode)
-            db.audit(c,'operator','PRODUCT_CREATED',payload.barcode)
+            db.audit(c,actor,'PRODUCT_CREATED',payload.barcode)
             row=c.execute('SELECT id,barcode,name,price_cents,stock,reserved_stock FROM products WHERE id=?',(cur.lastrowid,)).fetchone()
         return {**asdict(row),'created':True,'system_of_record':'sqlite'}
 
-    @app.patch('/api/admin/products/{product_id}',dependencies=[Depends(admin)])
-    def edit_product(product_id:int,payload:ProductEdit):
+    @app.patch('/api/admin/products/{product_id}')
+    def edit_product(product_id:int,payload:ProductEdit, actor:str=Depends(admin)):
         """Name and price only. Stock and reservations stay untouched."""
         with db.tx() as c:
             current=c.execute('SELECT id,barcode,stock,reserved_stock FROM products WHERE id=?',(product_id,)).fetchone()
             if not current:abort(404,'商品不存在')
             c.execute('UPDATE products SET name=?,price_cents=? WHERE id=?',
                       (payload.name,payload.price_cents,product_id))
-            db.audit(c,'operator','PRODUCT_EDIT',current['barcode'])
+            db.audit(c,actor,'PRODUCT_EDIT',current['barcode'])
             after=c.execute('SELECT stock,reserved_stock FROM products WHERE id=?',(product_id,)).fetchone()
             if after['stock']!=current['stock'] or after['reserved_stock']!=current['reserved_stock']:
                 raise RuntimeError('name/price edit changed stock')
         return {'id':product_id,'barcode':current['barcode'],'name':payload.name,'price_cents':payload.price_cents,
                 'stock':current['stock'],'reserved_stock':current['reserved_stock'],'stock_changed':False}
 
-    @app.post('/api/admin/products/{product_id}/listing',dependencies=[Depends(admin)])
-    def set_listing(product_id:int,payload:ListingInput):
+    @app.post('/api/admin/products/{product_id}/listing')
+    def set_listing(product_id:int,payload:ListingInput, actor:str=Depends(admin)):
         """上架/下架 one SKU. Stock, reservations, and the ledger stay unchanged."""
         with db.tx() as c:
             current=c.execute('SELECT id,barcode,stock,reserved_stock,active FROM products WHERE id=?',(product_id,)).fetchone()
@@ -866,7 +866,7 @@ def create_app(settings:Settings|None=None)->FastAPI:
             outcome='IDEMPOTENT' if current['active']==desired else ('LISTED' if desired else 'UNLISTED')
             if outcome!='IDEMPOTENT':
                 c.execute('UPDATE products SET active=? WHERE id=?',(desired,product_id))
-                db.audit(c,'operator','PRODUCT_'+outcome,current['barcode'])
+                db.audit(c,actor,'PRODUCT_'+outcome,current['barcode'])
             after=c.execute('SELECT stock,reserved_stock,active FROM products WHERE id=?',(product_id,)).fetchone()
             after_moves=c.execute('SELECT COUNT(*) n FROM stock_movements WHERE product_id=?',(product_id,)).fetchone()['n']
             if after['stock']!=current['stock'] or after['reserved_stock']!=current['reserved_stock'] or after_moves!=before_moves:
@@ -875,8 +875,8 @@ def create_app(settings:Settings|None=None)->FastAPI:
                 'stock':after['stock'],'reserved_stock':after['reserved_stock'],'stock_changed':False,
                 'physical_door_opened':False,'real_door_enabled':False}
 
-    @app.post('/api/admin/products/{product_id}/adjust-stock',dependencies=[Depends(admin)])
-    def adjust_stock(product_id:int,payload:StockChange):
+    @app.post('/api/admin/products/{product_id}/adjust-stock')
+    def adjust_stock(product_id:int,payload:StockChange, actor:str=Depends(admin)):
         if payload.quantity_delta==0:abort(422,'调整数量不能为 0')
         with db.tx() as c:
             p=c.execute('SELECT * FROM products WHERE id=?',(product_id,)).fetchone()
@@ -887,7 +887,7 @@ def create_app(settings:Settings|None=None)->FastAPI:
                 abort(409,'库存调整会低于可售底线或侵占未结算预留')
             c.execute('UPDATE products SET stock=? WHERE id=?',(new,product_id))
             db.movement(c,product_id,payload.quantity_delta,0,payload.reason,'MANUAL')
-            db.audit(c,'operator','STOCK_ADJUST',f'{product_id}:{payload.quantity_delta}')
+            db.audit(c,actor,'STOCK_ADJUST',f'{p["barcode"]}:{payload.quantity_delta}')
         return {'product_id':product_id,'stock':new,'reserved_stock':p['reserved_stock'],
                 'reason':payload.reason,'system_of_record':'sqlite'}
 
@@ -919,8 +919,8 @@ def create_app(settings:Settings|None=None)->FastAPI:
         if not path.is_absolute():path=(ROOT/path).resolve()
         return path.resolve()
 
-    @app.get('/api/admin/backup',dependencies=[Depends(admin)])
-    def download_backup():
+    @app.get('/api/admin/backup')
+    def download_backup(actor:str=Depends(admin)):
         """Online SQLite backup. The file is not written into the repository."""
         src=live_database_file()
         if not src.is_file():abort(404,'找不到数据库')
@@ -936,14 +936,14 @@ def create_app(settings:Settings|None=None)->FastAPI:
         finally:
             dst.unlink(missing_ok=True)
         with db.connect() as c:
-            db.audit(c,'operator','BACKUP_DOWNLOAD',src.name)
+            db.audit(c,actor,'BACKUP_DOWNLOAD',src.name)
         stamp=datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
         return Response(payload,media_type='application/vnd.sqlite3',headers={
             'Content-Disposition':f'attachment; filename="openretail-{stamp}.sqlite3"',
             'X-OpenRetail-Live-Replaced':'false'})
 
-    @app.post('/api/admin/restore-preview',dependencies=[Depends(admin)])
-    async def restore_preview(file:UploadFile=File(...)):
+    @app.post('/api/admin/restore-preview')
+    async def restore_preview(file:UploadFile=File(...), actor:str=Depends(admin)):
         """Assess an uploaded backup in an isolated file. Never replaces DB_PATH."""
         raw=await file.read(20_000_001)
         if len(raw)>20_000_000:abort(413,'备份文件过大')
@@ -965,7 +965,7 @@ def create_app(settings:Settings|None=None)->FastAPI:
         finally:
             shutil.rmtree(folder,ignore_errors=True)
         with db.connect() as c:
-            db.audit(c,'operator','RESTORE_PREVIEW','isolated')
+            db.audit(c,actor,'RESTORE_PREVIEW','isolated')
         return {'integrity':report['integrity'],'products':report['products'],'orders':report['orders'],
                 'paid_orders':report['paid_orders'],'ok':report['ok'],'problems':report['problems'],
                 'live_replaced':False,'physical_door_opened':False,'real_door_enabled':False,
@@ -994,8 +994,8 @@ def create_app(settings:Settings|None=None)->FastAPI:
                                                   FROM help_requests ORDER BY id DESC LIMIT 50''')]
         return {'physical_door_opened':False,'payment_required_to_leave':False,'requests':rows}
 
-    @app.post('/api/admin/help-requests/{request_id}/status',dependencies=[Depends(admin)])
-    def update_help_status(request_id:int,payload:HelpStatus):
+    @app.post('/api/admin/help-requests/{request_id}/status')
+    def update_help_status(request_id:int,payload:HelpStatus, actor:str=Depends(admin)):
         """Mark a help request seen or done. Never opens a door or collects payment."""
         if payload.status not in ('ACKNOWLEDGED','RESOLVED'):
             abort(422,'状态只能是 ACKNOWLEDGED 或 RESOLVED')
@@ -1007,7 +1007,7 @@ def create_app(settings:Settings|None=None)->FastAPI:
             outcome='IDEMPOTENT' if row['status']==payload.status else payload.status
             if outcome!='IDEMPOTENT':
                 c.execute('UPDATE help_requests SET status=? WHERE id=?',(payload.status,request_id))
-                db.audit(c,'operator','HELP_'+payload.status,str(request_id))
+                db.audit(c,actor,'HELP_'+payload.status,str(request_id))
         return {'id':request_id,'status':payload.status,'outcome':outcome,
                 'physical_door_opened':False,'door_authorized':False,'payment_required_to_leave':False}
 
@@ -1036,6 +1036,14 @@ def create_app(settings:Settings|None=None)->FastAPI:
                     SUM(reserved_delta) OVER (PARTITION BY product_id ORDER BY id) reserved_after
                     FROM stock_movements ORDER BY id DESC LIMIT ?''',(limit,))]
         return {'system_of_record':'sqlite','balanced':balanced,'products':products,'movements':movements}
+
+    @app.get('/api/admin/audit')
+    def admin_audit(limit:int=Query(default=40,ge=1,le=200), actor:str=Depends(admin)):
+        """Read-only privileged-action trail. Rows are not editable from this API."""
+        with db.connect() as c:
+            rows=[asdict(x) for x in c.execute(
+                'SELECT id,actor,action,detail,created_at FROM audit_events ORDER BY id DESC LIMIT ?',(limit,))]
+        return {'append_only':True,'physical_door_opened':False,'payment_required_to_leave':False,'events':rows}
 
     @app.get('/api/admin/events',dependencies=[Depends(admin)])
     def admin_events():

@@ -97,6 +97,7 @@ with TestClient(create_app(cfg)) as backend,sync_playwright() as pw:
  p.wait_for_function("document.querySelector('#product-status').textContent.includes('库存已调整为 6')")
  p.locator('[data-listing-barcode="6900000099991"]').click()
  p.wait_for_function("document.querySelector('#product-status').textContent.includes('已下架') && document.querySelector('#product-status').textContent.includes('库存仍为 6')")
+ p.wait_for_function("document.querySelector('#audit-list').textContent.includes('PRODUCT_UNLISTED') && document.querySelector('#audit-list').textContent.includes('6900000099991')")
  p.locator('[data-panel="shop"]').click()
  p.locator('#barcode').fill('6900000099991')
  p.locator('#scan-form button[type="submit"]').click()
