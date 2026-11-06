@@ -1,6 +1,6 @@
 'use strict';
 const $=id=>document.getElementById(id);
-const state={products:[],cart:new Map(),token:sessionStorage.getItem('retail_guest')||'',csrf:'',orderId:'',lastOrderId:'',orderTotal:null,orderLines:null,paying:false,helping:false,paymentPollId:null,paymentProvider:'MOCK_ONLY',demo:true,inviteRequired:false,scanner:null,scanTimer:null};
+const state={products:[],cart:new Map(),token:sessionStorage.getItem('retail_guest')||'',csrf:'',orderId:'',lastOrderId:'',orderTotal:null,orderLines:null,paying:false,helping:false,issuing:false,paymentPollId:null,paymentProvider:'MOCK_ONLY',demo:true,inviteRequired:false,scanner:null,scanTimer:null};
 const money=cents=>'¥'+(Number(cents||0)/100).toFixed(2);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const time=t=>t?new Date(t*1000).toLocaleString('zh-CN'):'—';
@@ -85,9 +85,13 @@ if(inviteFromUrl){history.replaceState(null,'',location.pathname);$('invite-toke
  state.token=r.guest_token;sessionStorage.setItem('retail_guest',state.token);$('invite-token').value='';
  $('entry-result').textContent='结账会话已领取；这不是进店权限。';await showEntryStatus();await loadProducts();toast('结账会话已激活');armBarcodeField()});}
 $('issue-invite').onclick=()=>run(async()=>{
- const r=await api('/api/admin/checkout-invite',{admin:true,method:'POST'});
- $('invite-result').textContent='结账邀请码 '+r.invite+' · 约 '+(r.lifetime_seconds||120)+' 秒 · 有效期至 '+time(r.expires_at)+' · identity_verified=false · door_authorized=false · physical_door_opened=false · 不能作为进门凭证';
- $('invite-qr').src=r.qr_data_uri;$('invite-qr').hidden=false;
+ if(state.issuing)return;state.issuing=true;$('issue-invite').disabled=true;
+ try{const r=await api('/api/admin/checkout-invite',{admin:true,method:'POST'});
+  if(r.duplicate)return;
+  if(r.identity_verified||r.door_authorized||r.physical_door_opened||r.payment_required_to_leave)throw Error('邀请码不应核验身份或开门');
+  $('invite-result').textContent='结账邀请码 '+r.invite+' · 约 '+(r.lifetime_seconds||120)+' 秒 · 有效期至 '+time(r.expires_at)+' · identity_verified=false · door_authorized=false · physical_door_opened=false · 不能作为进门凭证';
+  $('invite-qr').src=r.qr_data_uri;$('invite-qr').hidden=false;
+ }finally{state.issuing=false;$('issue-invite').disabled=false}
 });
 $('cancel-order-btn').onclick=()=>run(async()=>{if(!state.orderId)return;
  const r=await api('/api/orders/'+state.orderId+'/cancel',{method:'POST',guest:true});

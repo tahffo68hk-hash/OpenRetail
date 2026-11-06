@@ -204,6 +204,8 @@ def create_app(settings:Settings|None=None)->FastAPI:
     app.state.wechat=wechat
     app.state.help_guard=threading.Lock()
     app.state.help_inflight=set()
+    app.state.invite_guard=threading.Lock()
+    app.state.invite_inflight=False
 
     @app.middleware('http')
     async def security_headers(request:Request,call_next):
@@ -418,19 +420,31 @@ def create_app(settings:Settings|None=None)->FastAPI:
     @app.post('/api/admin/checkout-invite')
     def create_checkout_invite(actor:str=Depends(admin)):
         # Staffed checkout token is NOT identity verification or door access.
-        with db.tx() as c:
-            mode=c.execute("SELECT value FROM store_settings WHERE key='mode'").fetchone()['value']
-            if mode!='STAFFED':abort(409,'仅允许有人值守的试点结账')
-            invite=random_token();ts=now()
-            c.execute('INSERT INTO checkout_invites(invite_hash,created_at,expires_at) VALUES(?,?,?)',
-                      (digest(invite),ts,ts+120))
-            db.audit(c,actor,'INVITE_CREATED','lifetime_seconds=120')
-        base=cfg.public_base_url.rstrip('/') if not cfg.demo else 'http://127.0.0.1:8000'
-        url=base+'/?invite='+invite
-        return {'invite':invite,'checkout_url':url,'qr_data_uri':qr_image_data(url),
-                'expires_at':ts+120,'lifetime_seconds':120,'identity_verified':False,
-                'door_authorized':False,'physical_door_opened':False,'payment_required_to_leave':False,
-                'purpose':'STAFFED_CHECKOUT_ONLY','note':'只用于有人值守的结账，不是进店凭证'}
+        with app.state.invite_guard:
+            if app.state.invite_inflight:
+                return {'duplicate':True,'invite':None,'lifetime_seconds':120,'identity_verified':False,
+                        'door_authorized':False,'physical_door_opened':False,'payment_required_to_leave':False,
+                        'purpose':'STAFFED_CHECKOUT_ONLY','note':'只用于有人值守的结账，不是进店凭证'}
+            app.state.invite_inflight=True
+        try:
+            hold=getattr(app.state,'hold_invite',None)
+            if hold:hold()
+            with db.tx() as c:
+                mode=c.execute("SELECT value FROM store_settings WHERE key='mode'").fetchone()['value']
+                if mode!='STAFFED':abort(409,'仅允许有人值守的试点结账')
+                invite=random_token();ts=now()
+                c.execute('INSERT INTO checkout_invites(invite_hash,created_at,expires_at) VALUES(?,?,?)',
+                          (digest(invite),ts,ts+120))
+                db.audit(c,actor,'INVITE_CREATED','lifetime_seconds=120')
+            base=cfg.public_base_url.rstrip('/') if not cfg.demo else 'http://127.0.0.1:8000'
+            url=base+'/?invite='+invite
+            return {'invite':invite,'checkout_url':url,'qr_data_uri':qr_image_data(url),
+                    'expires_at':ts+120,'lifetime_seconds':120,'identity_verified':False,
+                    'door_authorized':False,'physical_door_opened':False,'payment_required_to_leave':False,
+                    'duplicate':False,'purpose':'STAFFED_CHECKOUT_ONLY','note':'只用于有人值守的结账，不是进店凭证'}
+        finally:
+            with app.state.invite_guard:
+                app.state.invite_inflight=False
 
     @app.post('/api/entry/redeem')
     def redeem_checkout_invite(payload:RedeemInvite):

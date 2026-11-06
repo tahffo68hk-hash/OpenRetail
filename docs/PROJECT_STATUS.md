@@ -4,6 +4,18 @@
 
 完全无人值守经营仍是 **NOT_APPROVED**。示例配置里的真实支付和实体开锁都是关闭的。
 
+## 本增量（邀请码进行中忽略第二次点击）
+
+已在代码和测试里做到，并在本机复跑：
+
+- 「创建2分钟邀请码」在第一次请求还没结束时，再点一次不会再发一张邀请码，也不会再写一条 `INVITE_CREATED`。第一次完成后可以再为下一位顾客发一张。
+- 页面仍显示这一张码、约 120 秒、identity_verified=false、door_authorized=false、physical_door_opened=false，并写明不能作为进门凭证。二维码仍会出现。`INVITE_CREATED` 仍只记 `lifetime_seconds=120`，不记邀请码。
+- 领取这张未使用的码仍得到会话，三个标志仍是 false。演示「生成访客会话」不需要邀请码，也不写 `INVITE_REDEEMED`。这条路径不改账面或预留，不写库存流水，不开门，不调用支付机构。
+
+`/tmp/openretail-venv/bin/python -m pytest -q`（工作目录 `/workspace`，Python 3.12.3）：**83 passed，1 warning，9.37s，退出码 0**。警告仍是 Starlette 的 `httpx` TestClient 弃用提示。83 = 上一轮 82 + 本增量 1。
+
+`scripts/ui_bridge_smoke.py` 在去掉密钥环境变量后退出码 0。顾客没有领取邀请码，仍用「生成访客会话」完成 ¥2.00 模拟支付，并含「模拟支付成功 · 非真实资金 · 已扣库存」。管理页对「创建2分钟邀请码」连点两次后只留下一张未使用的邀请码，结果含 120 秒和三个 false，并显示二维码。390 宽 `scrollWidth` 390，1440 宽 `scrollWidth` 1440，`pageerror` 为空。这仍是 Chrome 到 TestClient 的桥，不是真机，也不是真实收款。这条 PR 仍未合并。
+
 ## 本增量（求助进行中忽略第二次点击）
 
 已在代码和测试里做到，并在本机复跑：
