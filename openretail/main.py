@@ -90,6 +90,19 @@ def require_quantity_delta(value):
         abort(422,'调整数量不能为 0')
     return value
 
+def require_low_stock_threshold(value):
+    """A low-stock threshold is a positive integer. Empty, zero, and junk are not a threshold."""
+    if isinstance(value,str):
+        text=value.strip()
+        if not text or not text.isdigit():abort(422,'请输入有效低库存阈值')
+        value=int(text)
+    elif isinstance(value,float):
+        if not value.is_integer():abort(422,'请输入有效低库存阈值')
+        value=int(value)
+    if isinstance(value,bool) or not isinstance(value,int) or value<1 or value>10_000:
+        abort(422,'请输入有效低库存阈值')
+    return value
+
 def contains_like(text:str)->str:
     # Literal substring. % and _ in a barcode or name stay characters, not wildcards.
     escaped=text.replace('\\','\\\\').replace('%','\\%').replace('_','\\_')
@@ -213,7 +226,7 @@ class HelpInput(BaseModel):
 class HelpStatus(BaseModel):
     status:str
 class StoreSettingsInput(BaseModel):
-    low_stock_threshold:int|None=Field(default=None,ge=1,le=10_000)
+    low_stock_threshold:Any=None
     timezone:str|None=Field(default=None,min_length=1,max_length=64)
 
 
@@ -1151,23 +1164,26 @@ def create_app(settings:Settings|None=None)->FastAPI:
     @app.put('/api/admin/store-settings')
     def update_store_settings(payload:StoreSettingsInput, actor:str=Depends(admin)):
         """Staff threshold and business-day timezone. No door or payment side effects."""
-        if payload.low_stock_threshold is None and payload.timezone is None:
+        threshold_given='low_stock_threshold' in payload.model_fields_set
+        threshold=require_low_stock_threshold(payload.low_stock_threshold) if threshold_given else None
+        if threshold is None and payload.timezone is None:
             abort(422,'请提供低库存阈值或门店时区')
         if payload.timezone is not None:
             load_zone(payload.timezone)
         with db.tx() as c:
-            if payload.low_stock_threshold is not None:
+            if threshold is not None:
                 c.execute('''INSERT INTO store_settings(key,value) VALUES('low_stock_threshold',?)
-                             ON CONFLICT(key) DO UPDATE SET value=excluded.value''',(str(payload.low_stock_threshold),))
+                             ON CONFLICT(key) DO UPDATE SET value=excluded.value''',(str(threshold),))
             if payload.timezone is not None:
                 c.execute('''INSERT INTO store_settings(key,value) VALUES('store_timezone',?)
                              ON CONFLICT(key) DO UPDATE SET value=excluded.value''',(payload.timezone,))
             db.audit(c,actor,'STORE_SETTINGS',
-                     f"threshold={payload.low_stock_threshold};timezone={payload.timezone or ''}")
-            threshold=int(c.execute("SELECT value FROM store_settings WHERE key='low_stock_threshold'").fetchone()['value'])
+                     f"threshold={threshold};timezone={payload.timezone or ''}")
+            stored=int(c.execute("SELECT value FROM store_settings WHERE key='low_stock_threshold'").fetchone()['value'])
             zone_name=c.execute("SELECT value FROM store_settings WHERE key='store_timezone'").fetchone()['value']
-        return {'low_stock_threshold':threshold,'store_timezone':zone_name,
-                'physical_door_opened':False,'real_door_enabled':False}
+        return {'low_stock_threshold':stored,'store_timezone':zone_name,
+                'physical_door_opened':False,'real_door_enabled':False,
+                'identity_verified':False,'door_authorized':False}
 
     @app.get('/api/admin/products',dependencies=[Depends(admin)])
     def admin_products(q:str=Query(default=''), listing:str=Query(default='all'), low_stock:bool=Query(default=False)):

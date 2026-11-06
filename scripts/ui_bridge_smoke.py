@@ -205,6 +205,13 @@ with TestClient(create_app(cfg)) as backend,sync_playwright() as pw:
  p.wait_for_function("document.querySelector('#low-stock-list').textContent.includes('6900000099991') && document.querySelector('#low-stock-list').textContent.includes('预留')")
  p.locator('[data-find-product="6900000099991"]').click()
  p.wait_for_function("document.querySelector('#catalog-query').value==='6900000099991' && document.querySelector('#admin-catalog').textContent.includes('6900000099991') && document.querySelector('#admin-catalog').textContent.includes('预留')")
+ p.locator('#low-stock-threshold').evaluate("el => { el.value='0'; }")
+ p.locator('#store-settings-form button[type="submit"]').click()
+ p.wait_for_function("document.querySelector('#store-settings-status').textContent==='请输入有效低库存阈值' && document.querySelector('#toast').textContent.includes('请输入有效低库存阈值') && !document.querySelector('#toast').textContent.includes('门店设置已保存')")
+ with backend.app.state.db.connect() as conn:
+  assert conn.execute("SELECT value FROM store_settings WHERE key='low_stock_threshold'").fetchone()['value']=='5'
+  assert conn.execute("SELECT value FROM store_settings WHERE key='store_timezone'").fetchone()['value']=='Asia/Shanghai'
+  assert conn.execute("SELECT COUNT(*) n FROM audit_events WHERE action='STORE_SETTINGS'").fetchone()['n']==0
  p.locator('#low-stock-threshold').fill('3')
  p.locator('#store-settings-form button[type="submit"]').click()
  p.wait_for_function("document.querySelector('#store-settings-status').textContent.includes('已保存') && document.querySelector('#store-settings-status').textContent.includes('阈值 3')")
