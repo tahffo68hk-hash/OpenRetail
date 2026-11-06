@@ -43,9 +43,11 @@ with TestClient(create_app(cfg)) as backend,sync_playwright() as pw:
  p.wait_for_function("document.querySelector('#entry-result').textContent.includes('成功')")
  p.locator('#barcode').fill('0000000000000')
  p.locator('#scan-form button[type="submit"]').click()
- p.wait_for_function("document.querySelector('#scan-hint').textContent.includes('未找到条码')")
+ p.wait_for_function("document.querySelector('#scan-hint').textContent.includes('未找到条码') && document.querySelector('#barcode').value==='' && document.activeElement===document.querySelector('#barcode')")
  assert p.locator('#cart-total').inner_text()=='¥0.00'
- p.locator('.add-btn').first.click()
+ p.locator('#barcode').fill('6901234567892')
+ p.locator('#scan-form button[type="submit"]').click()
+ p.wait_for_function("document.querySelector('#scan-hint').textContent.includes('已添加') && document.querySelector('#scan-hint').textContent.includes('瓶装饮用水') && document.querySelector('#barcode').value==='' && document.activeElement===document.querySelector('#barcode') && document.querySelector('#cart-total').textContent==='¥2.00'")
  p.locator('#checkout-btn').click()
  p.wait_for_function("document.querySelector('#payment-result').textContent.includes('订单') && document.querySelector('#payment-result').textContent.includes('预留至') && document.querySelector('#payment-result').textContent.includes('Asia/Shanghai') && document.querySelector('#payment-result').textContent.includes('¥2.00')")
  held=p.locator('#receipt-id').input_value()
