@@ -27,12 +27,13 @@ def test_unlist_blocks_sale_and_relist_restores_it_without_stock_changes(client,
     assert all(row['barcode']!='6900000077773' for row in client.get('/api/products').json())
     lookup=client.get('/api/products/by-barcode/6900000077773')
     assert lookup.status_code==409 and '已下架' in lookup.json()['detail']
-    assert client.post('/api/orders', headers=guest, json={'request_id':'cannot-buy-unlisted',
+    buyer=visitor(client)
+    assert client.post('/api/orders', headers=buyer, json={'request_id':'cannot-buy-unlisted',
         'lines':[{'product_id':created['id'], 'quantity':1}]}).status_code==422
     shown=client.post('/api/admin/products/'+str(created['id'])+'/listing', headers=admin_header, json={'active':True})
     assert shown.status_code==200 and shown.json()['active'] is True and shown.json()['stock']==8
     assert client.get('/api/products/by-barcode/6900000077773').status_code==200
-    sold=client.post('/api/orders', headers=guest, json={'request_id':'buy-after-relist',
+    sold=client.post('/api/orders', headers=buyer, json={'request_id':'buy-after-relist',
         'lines':[{'product_id':created['id'], 'quantity':1}]})
     assert sold.status_code==201
     again=client.post('/api/admin/products/'+str(seeded['id'])+'/listing', headers=admin_header, json={'active':False})

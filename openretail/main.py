@@ -508,6 +508,8 @@ def create_app(settings:Settings|None=None)->FastAPI:
             if old:
                 if old['fingerprint']!=fp:abort(409,'同一幂等键不能用于不同购物车')
                 return row_order(c,old['id'])
+            if c.execute('''SELECT id FROM orders WHERE session_id=? AND status IN ('PENDING','PAYMENT_PENDING')''',(sid,)).fetchone():
+                abort(409,'已有待付款订单，请先完成付款或取消订单')
             prepared=[];total=0
             for pid,q in sorted(aggregate.items()):
                 p=c.execute('SELECT * FROM products WHERE id=? AND active=1',(pid,)).fetchone()

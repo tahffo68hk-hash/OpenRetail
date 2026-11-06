@@ -13,6 +13,7 @@ def levels(client, product_id):
 
 def test_unknown_unlisted_and_oversell_leave_stock_alone(client, admin_header):
     guest=visitor(client)
+    buyer=visitor(client)
     before=client.get('/api/products').json()
     missing=client.get('/api/products/by-barcode/0000000000000')
     assert missing.status_code==404 and missing.json()['detail']=='未找到条码'
@@ -38,7 +39,7 @@ def test_unknown_unlisted_and_oversell_leave_stock_alone(client, admin_header):
     assert hidden.status_code==200 and hidden.json()['stock']==2
     lookup=client.get('/api/products/by-barcode/6900000082008')
     assert lookup.status_code==409 and lookup.json()['detail']=='该商品已下架，暂不销售'
-    refused=client.post('/api/orders',headers=guest,json={'request_id':'scan-unlisted-0003',
+    refused=client.post('/api/orders',headers=buyer,json={'request_id':'scan-unlisted-0003',
         'lines':[{'product_id':made['id'],'quantity':1}]})
     assert refused.status_code==422 and '已下架' in refused.json()['detail']
     grown=client.post(f"/api/orders/{created['id']}/lines",headers=guest,json={'product_id':made['id'],'quantity':3})

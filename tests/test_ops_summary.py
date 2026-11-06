@@ -74,9 +74,9 @@ def test_shanghai_early_morning_counts_today_and_threshold_update_hides_stock_fi
     product=client.get('/api/products').json()[0]
     morning=client.post('/api/orders', headers=guest, json={'request_id':'shanghai-0100-today',
         'lines':[{'product_id':product['id'], 'quantity':1}]}).json()
+    assert client.post('/api/payments/mock-confirm', headers=guest, json={'order_id':morning['id']}).json()['payment_kind']=='MOCK_NOT_REAL_MONEY'
     evening=client.post('/api/orders', headers=guest, json={'request_id':'shanghai-previous-evening',
         'lines':[{'product_id':product['id'], 'quantity':1}]}).json()
-    assert client.post('/api/payments/mock-confirm', headers=guest, json={'order_id':morning['id']}).json()['payment_kind']=='MOCK_NOT_REAL_MONEY'
     assert client.post('/api/payments/mock-confirm', headers=guest, json={'order_id':evening['id']}).json()['real_money'] is False
     with client.app.state.db.tx() as conn:
         conn.execute('UPDATE orders SET created_at=?, paid_at=? WHERE id=?', (int(one_am.timestamp()), int(one_am.timestamp()), morning['id']))
