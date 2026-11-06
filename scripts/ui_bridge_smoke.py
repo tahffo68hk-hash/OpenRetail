@@ -100,6 +100,8 @@ with TestClient(create_app(cfg)) as backend,sync_playwright() as pw:
  p.locator('#product-form button[type="submit"]').click()
  p.wait_for_function("document.querySelector('#product-status').textContent.includes('已新增')")
  p.wait_for_function("document.querySelector('#low-stock-list').textContent.includes('6900000099991') && document.querySelector('#low-stock-list').textContent.includes('预留')")
+ p.locator('[data-find-product="6900000099991"]').click()
+ p.wait_for_function("document.querySelector('#catalog-query').value==='6900000099991' && document.querySelector('#admin-catalog').textContent.includes('6900000099991') && document.querySelector('#admin-catalog').textContent.includes('预留')")
  p.locator('#low-stock-threshold').fill('3')
  p.locator('#store-settings-form button[type="submit"]').click()
  p.wait_for_function("document.querySelector('#store-settings-status').textContent.includes('已保存') && document.querySelector('#store-settings-status').textContent.includes('阈值 3')")
