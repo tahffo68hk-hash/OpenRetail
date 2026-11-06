@@ -250,7 +250,8 @@ def create_app(settings:Settings|None=None)->FastAPI:
         with db.connect() as c:
             row=c.execute('SELECT id,expires_at FROM guest_sessions WHERE token_hash=?',
                           (digest(authorization[7:]),)).fetchone()
-        if not row or row['expires_at']<=now():abort(401,'访客会话已失效')
+        if not row:abort(401,'访客会话已失效')
+        if row['expires_at']<=now():abort(401,'访客会话已过期')
         return row['id']
 
     def payment_facts(c,order_id,status):
@@ -290,7 +291,11 @@ def create_app(settings:Settings|None=None)->FastAPI:
         events=[asdict(r) for r in c.execute(
             '''SELECT id,result,provider,detail,created_at FROM door_events
                WHERE session_id=? ORDER BY id DESC LIMIT 20''',(session_id,))]
-        return {'session_id':session_id,'expires_at':row['expires_at'] if row else None,
+        zone_name,zone=store_zone(c)
+        expires_at=row['expires_at'] if row else None
+        return {'session_id':session_id,'expires_at':expires_at,
+                'expires_local':format_local(expires_at,zone) if expires_at is not None else '',
+                'expires_timezone':zone_name,
                 'identity_verified':False,'door_authorized':False,'physical_door_opened':False,
                 'virtual_only':True,'events':events}
 
@@ -464,7 +469,8 @@ def create_app(settings:Settings|None=None)->FastAPI:
         with db.connect() as c:
             row=c.execute('SELECT id,expires_at FROM guest_sessions WHERE token_hash=?',
                           (digest(authorization[7:]),)).fetchone()
-        if not row or row['expires_at']<=now():abort(401,'访客会话已失效')
+        if not row:abort(401,'访客会话已失效')
+        if row['expires_at']<=now():abort(401,'访客会话已过期')
         return row['id']
 
     @app.post('/api/help',status_code=201)
