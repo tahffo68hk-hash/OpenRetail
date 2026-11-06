@@ -152,6 +152,22 @@ with TestClient(create_app(cfg)) as backend,sync_playwright() as pw:
  p.wait_for_function("document.querySelector('#product-status').textContent==='请输入商品条码'")
  with backend.app.state.db.connect() as conn:
   assert conn.execute('SELECT COUNT(*) n FROM products').fetchone()['n']==products_before
+  water_name=conn.execute("SELECT name,price_cents FROM products WHERE barcode='6901234567892'").fetchone()
+ p.locator('#product-form input[name="barcode"]').fill('6900000099991')
+ p.locator('#product-form input[name="name"]').fill('   ')
+ p.locator('#product-form input[name="price"]').fill('3.50')
+ p.locator('#product-form input[name="stock"]').fill('4')
+ p.locator('#product-form button[type="submit"]').click()
+ p.wait_for_function("document.querySelector('#product-status').textContent==='请输入商品名称' && document.querySelector('#toast').textContent.includes('请输入商品名称')")
+ p.locator('#edit-form input[name="barcode"]').fill('6901234567892')
+ p.locator('#edit-form input[name="name"]').fill('  ')
+ p.locator('#edit-form input[name="price"]').fill('9.90')
+ p.locator('#edit-form button[type="submit"]').click()
+ p.wait_for_function("document.querySelector('#product-status').textContent==='请输入商品名称'")
+ with backend.app.state.db.connect() as conn:
+  assert conn.execute('SELECT COUNT(*) n FROM products').fetchone()['n']==products_before
+  same=conn.execute("SELECT name,price_cents FROM products WHERE barcode='6901234567892'").fetchone()
+  assert same['name']==water_name['name'] and same['price_cents']==water_name['price_cents']
  p.locator('#product-form input[name="barcode"]').fill('6900000099991')
  p.locator('#product-form input[name="name"]').fill('烟雾测试商品')
  p.locator('#product-form input[name="price"]').fill('3.50')

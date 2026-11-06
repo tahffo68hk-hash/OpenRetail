@@ -150,12 +150,12 @@ class LineQuantity(BaseModel):
 
 class ProductInput(BaseModel):
     barcode:str=Field(min_length=0,max_length=64)
-    name:str=Field(min_length=1,max_length=120)
+    name:str=Field(min_length=0,max_length=120)
     price_cents:int=Field(ge=1,le=100_000_000)
     stock:int=Field(ge=0,le=1_000_000)
     active:bool=True
 class ProductEdit(BaseModel):
-    name:str=Field(min_length=1,max_length=120)
+    name:str=Field(min_length=0,max_length=120)
     price_cents:int=Field(ge=1,le=100_000_000)
 class ListingInput(BaseModel):
     active:bool
@@ -1120,12 +1120,14 @@ def create_app(settings:Settings|None=None)->FastAPI:
         """Add one SQLite catalog row. Duplicate barcodes are not an overwrite."""
         barcode=payload.barcode.strip()
         if not barcode:abort(422,'请输入商品条码')
+        name=payload.name.strip()
+        if not name:abort(422,'请输入商品名称')
         with db.tx() as c:
             db.expire(c,now())
             if c.execute('SELECT id FROM products WHERE barcode=?',(barcode,)).fetchone():
                 abort(409,'条码已存在。请只改名称售价，或做单品库存调整；不要整表覆盖。')
             cur=c.execute('INSERT INTO products(barcode,name,price_cents,stock,active) VALUES(?,?,?,?,?)',
-                          (barcode,payload.name,payload.price_cents,payload.stock,int(payload.active)))
+                          (barcode,name,payload.price_cents,payload.stock,int(payload.active)))
             db.movement(c,cur.lastrowid,payload.stock,0,'OPENING_BALANCE',barcode)
             db.audit(c,actor,'PRODUCT_CREATED',barcode)
             row=c.execute('SELECT id,barcode,name,price_cents,stock,reserved_stock FROM products WHERE id=?',(cur.lastrowid,)).fetchone()
@@ -1134,16 +1136,18 @@ def create_app(settings:Settings|None=None)->FastAPI:
     @app.patch('/api/admin/products/{product_id}')
     def edit_product(product_id:int,payload:ProductEdit, actor:str=Depends(admin)):
         """Name and price only. Stock and reservations stay untouched."""
+        name=payload.name.strip()
+        if not name:abort(422,'请输入商品名称')
         with db.tx() as c:
             current=c.execute('SELECT id,barcode,stock,reserved_stock FROM products WHERE id=?',(product_id,)).fetchone()
             if not current:abort(404,'商品不存在')
             c.execute('UPDATE products SET name=?,price_cents=? WHERE id=?',
-                      (payload.name,payload.price_cents,product_id))
+                      (name,payload.price_cents,product_id))
             db.audit(c,actor,'PRODUCT_EDIT',current['barcode'])
             after=c.execute('SELECT stock,reserved_stock FROM products WHERE id=?',(product_id,)).fetchone()
             if after['stock']!=current['stock'] or after['reserved_stock']!=current['reserved_stock']:
                 raise RuntimeError('name/price edit changed stock')
-        return {'id':product_id,'barcode':current['barcode'],'name':payload.name,'price_cents':payload.price_cents,
+        return {'id':product_id,'barcode':current['barcode'],'name':name,'price_cents':payload.price_cents,
                 'stock':current['stock'],'reserved_stock':current['reserved_stock'],'stock_changed':False}
 
     @app.post('/api/admin/products/{product_id}/listing')
