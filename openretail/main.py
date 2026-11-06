@@ -7,7 +7,9 @@ allowed only with separately configured WeChat Native merchant credentials.
 import hashlib
 import sys
 import base64
-from datetime import datetime
+import shutil
+import tempfile
+from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 import io
 import qrcode
@@ -31,6 +33,7 @@ from .security import digest,random_token,password_verify
 from .wechat import WeChatNative,PaymentSignatureError
 from .adapters import HomeAssistantAdapter,ERPNextReader,IntegrationError
 from .importer import parse_catalog,write_catalog,ImportErrorDetail
+from scripts.restore import restore_backup
 
 ROOT=Path(__file__).resolve().parent.parent
 
@@ -879,6 +882,63 @@ def create_app(settings:Settings|None=None)->FastAPI:
             db.audit(c,'operator','CSV_INITIAL_IMPORT',f'count={len(items)}')
         return {'dry_run':False,'count':len(items),'notice':'单次初始导入完成；禁止后续覆盖订单账本',
                 'system_of_record':'sqlite'}
+
+    def live_database_file()->Path:
+        path=Path(cfg.db_path)
+        if not path.is_absolute():path=(ROOT/path).resolve()
+        return path.resolve()
+
+    @app.get('/api/admin/backup',dependencies=[Depends(admin)])
+    def download_backup():
+        """Online SQLite backup. The file is not written into the repository."""
+        src=live_database_file()
+        if not src.is_file():abort(404,'找不到数据库')
+        handle=tempfile.NamedTemporaryFile(prefix='openretail-backup-',suffix='.sqlite3',delete=False)
+        handle.close()
+        dst=Path(handle.name)
+        try:
+            with sqlite3.connect(src) as conn, sqlite3.connect(dst) as target:
+                conn.backup(target)
+                check=target.execute('PRAGMA integrity_check').fetchone()[0]
+            if check!='ok':abort(500,'备份完整性检查失败')
+            payload=dst.read_bytes()
+        finally:
+            dst.unlink(missing_ok=True)
+        with db.connect() as c:
+            db.audit(c,'operator','BACKUP_DOWNLOAD',src.name)
+        stamp=datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+        return Response(payload,media_type='application/vnd.sqlite3',headers={
+            'Content-Disposition':f'attachment; filename="openretail-{stamp}.sqlite3"',
+            'X-OpenRetail-Live-Replaced':'false'})
+
+    @app.post('/api/admin/restore-preview',dependencies=[Depends(admin)])
+    async def restore_preview(file:UploadFile=File(...)):
+        """Assess an uploaded backup in an isolated file. Never replaces DB_PATH."""
+        raw=await file.read(20_000_001)
+        if len(raw)>20_000_000:abort(413,'备份文件过大')
+        if not raw.startswith(b'SQLite format 3\x00'):abort(422,'不是 SQLite 数据库文件，活动库未改动')
+        live=live_database_file()
+        folder=Path(tempfile.mkdtemp(prefix='openretail-restore-'))
+        uploaded=folder/'upload.sqlite3'
+        dest=folder/'isolated.sqlite3'
+        if dest.resolve()==live or uploaded.resolve()==live:
+            shutil.rmtree(folder,ignore_errors=True)
+            abort(409,'拒绝覆盖正在使用的数据库')
+        uploaded.write_bytes(raw)
+        try:
+            report=restore_backup(uploaded,dest,live=live)
+        except SystemExit as exc:
+            abort(422,str(exc))
+        except sqlite3.Error:
+            abort(422,'备份无法读取，活动库未改动')
+        finally:
+            shutil.rmtree(folder,ignore_errors=True)
+        with db.connect() as c:
+            db.audit(c,'operator','RESTORE_PREVIEW','isolated')
+        return {'integrity':report['integrity'],'products':report['products'],'orders':report['orders'],
+                'paid_orders':report['paid_orders'],'ok':report['ok'],'problems':report['problems'],
+                'live_replaced':False,'physical_door_opened':False,'real_door_enabled':False,
+                'note':'只预览隔离副本，没有替换活动库'}
 
     @app.get('/api/admin/export-products',dependencies=[Depends(admin)])
     def export_products():

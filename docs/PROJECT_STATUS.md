@@ -4,6 +4,19 @@
 
 完全无人值守经营仍是 **NOT_APPROVED**。示例配置里的真实支付和实体开锁都是关闭的。
 
+## 本增量（管理端备份与隔离恢复预览）
+
+已在代码和测试里做到，并在本机复跑：
+
+- 管理员 `GET /api/admin/backup` 用 SQLite 在线备份 API 下载副本，不复制可能写到一半的库文件。未登录返回 401。下载的临时文件会删掉，不写入仓库。
+- `POST /api/admin/restore-preview` 把上传文件恢复到另一份临时库并返回 `integrity_check`、商品数和订单数。响应 `live_replaced=false`。活动库的库存不变。
+- 把恢复目标指到活动库会被拒绝，活动库库存和订单仍在。不是 SQLite 的上传返回 422，活动库不动。
+- 管理页有下载和隔离预览。没有「替换正在使用的库」按钮。备份和预览不会开门，也不访问支付机构。
+
+`/tmp/openretail-venv/bin/python -m pytest -q`（工作目录 `/workspace`，Python 3.12.3）：**55 passed，1 warning，5.43s，退出码 0**。警告仍是 Starlette 的 `httpx` TestClient 弃用提示。55 = 上一轮 53 + 本增量 2。
+
+`scripts/ui_bridge_smoke.py` 在去掉密钥环境变量后退出码 0。管理页点击下载备份后，状态含「活动库未替换」。390 宽 `scrollWidth` 390，1440 宽 `scrollWidth` 1440，`pageerror` 为空。隔离预览的一致性数字由 pytest 核对；浏览器脚本没有上传文件。这仍是 Chrome 到 TestClient 的桥，不是真机。
+
 ## 本增量（上海营业日和可改的低库存阈值）
 
 已在代码和测试里做到，并在本机复跑：
