@@ -83,6 +83,8 @@ with TestClient(create_app(cfg)) as backend,sync_playwright() as pw:
  p.wait_for_function("document.querySelector('#order-lookup-status').textContent.includes('已找到订单') && document.querySelector('#order-lookup-status').textContent.includes('非真实资金') && document.querySelector('#help-list').textContent.includes('请到货架帮忙') && document.querySelector('#help-list').textContent.includes('待处理')")
  p.wait_for_function("document.querySelector('#door-event-list').textContent.includes('SESSION_ISSUED')")
  p.wait_for_function("document.querySelector('#door-lock-note').textContent.includes('physical_door_opened=false')")
+ p.locator('#issue-invite').click()
+ p.wait_for_function("document.querySelector('#invite-result').textContent.includes('120') && document.querySelector('#invite-result').textContent.includes('identity_verified=false') && document.querySelector('#invite-result').textContent.includes('door_authorized=false') && document.querySelector('#invite-result').textContent.includes('physical_door_opened=false')")
  p.locator('[data-help-status="ACKNOWLEDGED"]').click()
  p.wait_for_function("document.querySelector('#help-list').textContent.includes('已确认')")
  p.wait_for_function("document.querySelector('#ledger-balance').textContent.includes('一致')")

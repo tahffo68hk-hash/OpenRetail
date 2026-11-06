@@ -399,8 +399,8 @@ def create_app(settings:Settings|None=None)->FastAPI:
         buf=io.BytesIO();img.save(buf,format='PNG')
         return 'data:image/png;base64,'+base64.b64encode(buf.getvalue()).decode()
 
-    @app.post('/api/admin/checkout-invite',dependencies=[Depends(admin)])
-    def create_checkout_invite():
+    @app.post('/api/admin/checkout-invite')
+    def create_checkout_invite(actor:str=Depends(admin)):
         # Staffed checkout token is NOT identity verification or door access.
         with db.tx() as c:
             mode=c.execute("SELECT value FROM store_settings WHERE key='mode'").fetchone()['value']
@@ -408,16 +408,17 @@ def create_app(settings:Settings|None=None)->FastAPI:
             invite=random_token();ts=now()
             c.execute('INSERT INTO checkout_invites(invite_hash,created_at,expires_at) VALUES(?,?,?)',
                       (digest(invite),ts,ts+120))
-            db.audit(c,'operator','STAFF_CHECKOUT_INVITE','expires_120s')
+            db.audit(c,actor,'STAFF_CHECKOUT_INVITE','expires_120s')
         base=cfg.public_base_url.rstrip('/') if not cfg.demo else 'http://127.0.0.1:8000'
         url=base+'/?invite='+invite
         return {'invite':invite,'checkout_url':url,'qr_data_uri':qr_image_data(url),
-                'expires_at':ts+120,'identity_verified':False,
+                'expires_at':ts+120,'lifetime_seconds':120,'identity_verified':False,
+                'door_authorized':False,'physical_door_opened':False,'payment_required_to_leave':False,
                 'purpose':'STAFFED_CHECKOUT_ONLY','note':'只用于有人值守的结账，不是进店凭证'}
 
     @app.post('/api/entry/redeem')
     def redeem_checkout_invite(payload:RedeemInvite):
-        if cfg.demo:abort(409,'演示模式请直接创建模拟访客会话')
+        # Demo guest checkout via /api/entry stays available. This code is only the staffed path.
         token=random_token();sid=uuid4().hex;ts=now()
         with db.tx() as c:
             mode=c.execute("SELECT value FROM store_settings WHERE key='mode'").fetchone()['value']
@@ -431,7 +432,7 @@ def create_app(settings:Settings|None=None)->FastAPI:
             db.audit(c,'visitor','STAFFED_CHECKOUT_CREATED',sid[:12])
         return {'guest_token':token,'session_id':sid,'expires_at':ts+3600,
                 'identity_verified':False,'door_authorized':False,'physical_door_opened':False,
-                'virtual_event':'CHECKOUT_SESSION'}
+                'payment_required_to_leave':False,'virtual_event':'CHECKOUT_SESSION'}
 
     @app.post('/api/door/open')
     def door_open(sid:str=Depends(guest)):

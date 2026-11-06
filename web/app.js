@@ -71,8 +71,9 @@ $('receipt-copy').onclick=()=>run(async()=>{const id=$('receipt-id').value;if(!i
 $('cart-pay').onclick=()=>run(async()=>{if(state.paymentProvider==='WECHAT_NATIVE'){if(!state.orderId)await createOrder();$('pay-btn').click();return}if(state.paymentProvider!=='MOCK_ONLY')throw Error('没有配置可用的收款渠道');if(!state.orderId)await createOrder();const r=await confirmMock();toast(r.status==='PAID'?'模拟支付完成（没有真实资金流转）':describePayment(r).text)});
 $('redeem-btn').onclick=()=>run(async()=>{
  const invite=$('invite-token').value.trim();const r=await api('/api/entry/redeem',{method:'POST',body:{invite}});
+ if(r.identity_verified||r.door_authorized||r.physical_door_opened||r.payment_required_to_leave)throw Error('领取结账会话不应核验身份或开门');
  state.token=r.guest_token;sessionStorage.setItem('retail_guest',state.token);
- $('invite-token').value='';$('entry-result').textContent='已领取员工发放的结账会话；不会打开门禁。';
+ $('invite-token').value='';$('entry-result').textContent='已领取员工发放的结账会话；不会打开门禁。identity_verified=false · door_authorized=false · physical_door_opened=false';
  await showEntryStatus();await loadProducts();toast('已领取有效结账会话');
 });
 const inviteFromUrl=new URLSearchParams(location.search).get('invite');
@@ -82,7 +83,7 @@ if(inviteFromUrl){history.replaceState(null,'',location.pathname);$('invite-toke
  $('entry-result').textContent='结账会话已领取；这不是进店权限。';await showEntryStatus();await loadProducts();toast('结账会话已激活')});}
 $('issue-invite').onclick=()=>run(async()=>{
  const r=await api('/api/admin/checkout-invite',{admin:true,method:'POST'});
- $('invite-result').textContent='一次性链接，有效期至 '+time(r.expires_at)+'。请让顾客扫码，不能作为进门凭证。';
+ $('invite-result').textContent='结账邀请码 '+r.invite+' · 约 '+(r.lifetime_seconds||120)+' 秒 · 有效期至 '+time(r.expires_at)+' · identity_verified=false · door_authorized=false · physical_door_opened=false · 不能作为进门凭证';
  $('invite-qr').src=r.qr_data_uri;$('invite-qr').hidden=false;
 });
 $('cancel-order-btn').onclick=()=>run(async()=>{if(!state.orderId)return;

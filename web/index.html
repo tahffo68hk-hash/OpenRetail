@@ -102,7 +102,7 @@
           <h2 class="admin-section-title">设置</h2>
           <article class="surface"><div class="surface-heading"><div><h2>门店设置</h2><p>低库存阈值和门店时区。保存不会开门，也不会收款。</p></div></div><form id="store-settings-form" class="product-form"><label>低库存阈值<input id="low-stock-threshold" name="threshold" type="number" min="1" max="10000" required></label><label>门店时区<input id="store-timezone" name="timezone" required placeholder="Asia/Shanghai"></label><button class="btn secondary" type="submit">保存门店设置</button></form><div id="store-settings-status" class="inline-note">尚未修改</div></article>
           <article class="surface invite-panel"><div class="surface-heading"><div><h2>员工签发结账邀请码</h2>
-            <p>仅限有人营业的试点；不授权真实门禁，不代表身份核验。</p></div><button id="issue-invite" class="btn secondary">创建2分钟邀请码</button></div>
+            <p>约 120 秒、只能用一次。identity_verified=false，door_authorized=false，physical_door_opened=false。不是身份核验，也不是开门授权。演示顾客仍可直接生成访客会话。</p></div><button id="issue-invite" class="btn secondary">创建2分钟邀请码</button></div>
             <div id="invite-result" class="inline-note">尚未生成</div><img id="invite-qr" class="qr-code" alt="试点结账二维码" hidden></article>
           <div class="admin-grid">
             <article class="surface"><div class="surface-heading"><div><h2>营业模式</h2><p>试点只允许有人模式；不控制实际营业门</p></div></div><div class="mode-options"><button id="mode-staffed" class="mode-btn">☀️ 有人经营</button><button id="mode-unattended" class="mode-btn">🌙 无人值守</button></div><div class="inline-note" id="mode-info">当前模式：—</div></article>

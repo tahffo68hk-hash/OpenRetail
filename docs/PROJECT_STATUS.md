@@ -4,6 +4,17 @@
 
 完全无人值守经营仍是 **NOT_APPROVED**。示例配置里的真实支付和实体开锁都是关闭的。
 
+## 本增量（有人值守的结账邀请码）
+
+已在代码和测试里做到，并在本机复跑：
+
+- 管理页原来的「创建2分钟邀请码」现在把码、约 120 秒和到期时间显示出来，并标明 identity_verified=false、door_authorized=false、physical_door_opened=false。顾客页可以领取这个码。领取不开门，也不要求付款才能离开。
+- 同一码再用一次会被拒绝。过期的码也会被拒绝。演示里的「生成访客会话」仍然不需要邀请码，模拟支付仍可完成。未登录创建邀请码返回 401。
+
+`/tmp/openretail-venv/bin/python -m pytest -q`（工作目录 `/workspace`，Python 3.12.3）：**69 passed，1 warning，6.99s，退出码 0**。警告仍是 Starlette 的 `httpx` TestClient 弃用提示。69 = 上一轮 68 + 本增量 1。
+
+`scripts/ui_bridge_smoke.py` 在去掉密钥环境变量后退出码 0。顾客没有领取邀请码，仍完成 ¥2.00 模拟支付，并含「模拟支付成功 · 非真实资金」。管理页创建邀请码后，结果含「120」、identity_verified=false、door_authorized=false 和 physical_door_opened=false。390 宽 `scrollWidth` 390，1440 宽 `scrollWidth` 1440，`pageerror` 为空。这仍是 Chrome 到 TestClient 的桥，不是真机，也不是身份核验或真实收款。
+
 ## 本增量（刷新后恢复本会话订单）
 
 已在代码和测试里做到，并在本机复跑：
