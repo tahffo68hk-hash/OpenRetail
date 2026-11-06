@@ -206,6 +206,8 @@ def create_app(settings:Settings|None=None)->FastAPI:
     app.state.help_inflight=set()
     app.state.invite_guard=threading.Lock()
     app.state.invite_inflight=False
+    app.state.redeem_guard=threading.Lock()
+    app.state.redeem_inflight=set()
 
     @app.middleware('http')
     async def security_headers(request:Request,call_next):
@@ -449,26 +451,38 @@ def create_app(settings:Settings|None=None)->FastAPI:
     @app.post('/api/entry/redeem')
     def redeem_checkout_invite(payload:RedeemInvite):
         # Demo guest checkout via /api/entry stays available. This code is only the staffed path.
-        token=random_token();sid=uuid4().hex;ts=now()
-        with db.tx() as c:
-            mode=c.execute("SELECT value FROM store_settings WHERE key='mode'").fetchone()['value']
-            if mode!='STAFFED':abort(409,'仅有人经营模式允许领取结账会话')
-            token_hash=digest(payload.invite)
-            cur=c.execute('UPDATE checkout_invites SET consumed_at=? WHERE invite_hash=? AND consumed_at IS NULL AND expires_at>?',
-                          (ts,token_hash,ts))
-            if cur.rowcount!=1:
-                row=c.execute('SELECT consumed_at,expires_at FROM checkout_invites WHERE invite_hash=?',(token_hash,)).fetchone()
-                if not row:abort(401,'邀请码无效')
-                if row['consumed_at'] is not None:abort(401,'邀请码已使用')
-                abort(401,'邀请码已过期')
-            c.execute('INSERT INTO guest_sessions(id,token_hash,created_at,expires_at,verified_identity_hash) VALUES(?,?,?,?,?)',
-                      (sid,digest(token),ts,ts+3600,None))
-            record_virtual_door(c,sid,'CHECKOUT_SESSION','NOT A DOOR GRANT')
-            db.audit(c,'visitor','STAFFED_CHECKOUT_CREATED',sid[:12])
-            db.audit(c,'visitor','INVITE_REDEEMED',f'session={sid[:12]};identity_verified=false;door_authorized=false')
-        return {'guest_token':token,'session_id':sid,'expires_at':ts+3600,
-                'identity_verified':False,'door_authorized':False,'physical_door_opened':False,
-                'payment_required_to_leave':False,'virtual_event':'CHECKOUT_SESSION'}
+        code_hash=digest(payload.invite)
+        with app.state.redeem_guard:
+            if code_hash in app.state.redeem_inflight:
+                return {'duplicate':True,'guest_token':None,'session_id':None,
+                        'identity_verified':False,'door_authorized':False,'physical_door_opened':False,
+                        'payment_required_to_leave':False}
+            app.state.redeem_inflight.add(code_hash)
+        try:
+            hold=getattr(app.state,'hold_redeem',None)
+            if hold:hold()
+            token=random_token();sid=uuid4().hex;ts=now()
+            with db.tx() as c:
+                mode=c.execute("SELECT value FROM store_settings WHERE key='mode'").fetchone()['value']
+                if mode!='STAFFED':abort(409,'仅有人经营模式允许领取结账会话')
+                cur=c.execute('UPDATE checkout_invites SET consumed_at=? WHERE invite_hash=? AND consumed_at IS NULL AND expires_at>?',
+                              (ts,code_hash,ts))
+                if cur.rowcount!=1:
+                    row=c.execute('SELECT consumed_at,expires_at FROM checkout_invites WHERE invite_hash=?',(code_hash,)).fetchone()
+                    if not row:abort(401,'邀请码无效')
+                    if row['consumed_at'] is not None:abort(401,'邀请码已使用')
+                    abort(401,'邀请码已过期')
+                c.execute('INSERT INTO guest_sessions(id,token_hash,created_at,expires_at,verified_identity_hash) VALUES(?,?,?,?,?)',
+                          (sid,digest(token),ts,ts+3600,None))
+                record_virtual_door(c,sid,'CHECKOUT_SESSION','NOT A DOOR GRANT')
+                db.audit(c,'visitor','STAFFED_CHECKOUT_CREATED',sid[:12])
+                db.audit(c,'visitor','INVITE_REDEEMED',f'session={sid[:12]};identity_verified=false;door_authorized=false')
+            return {'guest_token':token,'session_id':sid,'expires_at':ts+3600,'duplicate':False,
+                    'identity_verified':False,'door_authorized':False,'physical_door_opened':False,
+                    'payment_required_to_leave':False,'virtual_event':'CHECKOUT_SESSION'}
+        finally:
+            with app.state.redeem_guard:
+                app.state.redeem_inflight.discard(code_hash)
 
     @app.post('/api/door/open')
     def door_open(sid:str=Depends(guest)):

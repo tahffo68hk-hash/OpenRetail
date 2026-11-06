@@ -162,6 +162,15 @@ with TestClient(create_app(cfg)) as backend,sync_playwright() as pw:
  assert '6900000099991' not in p.locator('#catalog').inner_text()
  p.locator('[data-panel="admin"]').click()
  p.wait_for_function("document.querySelector('#ledger-balance').textContent.includes('一致')")
+ code=p.locator('#invite-result').inner_text().split('结账邀请码 ',1)[1].split(' · ',1)[0]
+ p.locator('[data-panel="shop"]').click()
+ p.locator('#invite-token').fill(code)
+ p.evaluate("() => { const b=document.querySelector('#redeem-btn'); b.click(); b.click(); }")
+ p.wait_for_function("document.querySelector('#entry-result').textContent.includes('已领取员工发放的结账会话') && document.querySelector('#entry-result').textContent.includes('不会打开门禁') && !document.querySelector('#entry-result').textContent.includes('邀请码已使用')")
+ with backend.app.state.db.connect() as conn:
+  assert conn.execute("SELECT COUNT(*) n FROM audit_events WHERE action='INVITE_REDEEMED'").fetchone()['n']==1
+  assert conn.execute('SELECT COUNT(*) n FROM guest_sessions').fetchone()['n']==2
+ p.locator('[data-panel="admin"]').click()
  p.locator('#backup-download').click()
  p.wait_for_function("document.querySelector('#restore-report').textContent.includes('活动库未替换')")
  p.screenshot(path=str(root/'preview-mobile-v2.png'),full_page=True)

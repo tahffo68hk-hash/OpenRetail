@@ -1,6 +1,6 @@
 'use strict';
 const $=id=>document.getElementById(id);
-const state={products:[],cart:new Map(),token:sessionStorage.getItem('retail_guest')||'',csrf:'',orderId:'',lastOrderId:'',orderTotal:null,orderLines:null,paying:false,helping:false,issuing:false,paymentPollId:null,paymentProvider:'MOCK_ONLY',demo:true,inviteRequired:false,scanner:null,scanTimer:null};
+const state={products:[],cart:new Map(),token:sessionStorage.getItem('retail_guest')||'',csrf:'',orderId:'',lastOrderId:'',orderTotal:null,orderLines:null,paying:false,helping:false,issuing:false,redeeming:false,paymentPollId:null,paymentProvider:'MOCK_ONLY',demo:true,inviteRequired:false,scanner:null,scanTimer:null};
 const money=cents=>'¥'+(Number(cents||0)/100).toFixed(2);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const time=t=>t?new Date(t*1000).toLocaleString('zh-CN'):'—';
@@ -72,18 +72,14 @@ $('pay-btn').onclick=()=>run(async()=>{if(state.paying)return;if(!state.orderId)
  toast(r.status==='PAID'?'模拟支付完成（没有真实资金流转）':describePayment(r).text)}finally{state.paying=false;if(state.orderId&&state.paymentProvider==='MOCK_ONLY')$('pay-btn').disabled=false}});
 $('receipt-copy').onclick=()=>run(async()=>{const id=$('receipt-id').value;if(!id)throw Error('还没有订单编号');$('receipt-id').focus();$('receipt-id').select();try{await navigator.clipboard.writeText(id);toast('订单编号已复制')}catch{toast('订单编号已选中，可手动复制')}});
 $('cart-pay').onclick=()=>run(async()=>{if(state.paying)return;state.paying=true;$('cart-pay').disabled=true;$('checkout-btn').disabled=true;$('pay-btn').disabled=true;try{if(state.paymentProvider==='WECHAT_NATIVE'){if(!state.orderId)await createOrder();$('pay-btn').click();return}if(state.paymentProvider!=='MOCK_ONLY')throw Error('没有配置可用的收款渠道');if(!state.orderId)await createOrder();const r=await confirmMock();toast(r.status==='PAID'?'模拟支付完成（没有真实资金流转）':describePayment(r).text)}finally{state.paying=false;renderCart()}});
+async function redeemStaffInvite(invite,successText,toastText){if(state.redeeming)return;state.redeeming=true;$('redeem-btn').disabled=true;try{const r=await api('/api/entry/redeem',{method:'POST',body:{invite}});if(r.duplicate)return;if(r.identity_verified||r.door_authorized||r.physical_door_opened||r.payment_required_to_leave)throw Error('领取结账会话不应核验身份或开门');state.token=r.guest_token;sessionStorage.setItem('retail_guest',state.token);$('invite-token').value='';$('entry-result').textContent=successText;await showEntryStatus();await loadProducts();toast(toastText);armBarcodeField()}catch(e){$('entry-result').textContent=e.message;throw e}finally{state.redeeming=false;$('redeem-btn').disabled=false}}
 $('redeem-btn').onclick=()=>run(async()=>{
- const invite=$('invite-token').value.trim();if(!invite){$('entry-result').textContent='请填写店员发给的结账邀请码。这不是身份核验，也不会开门。';throw Error('请填写店员发给的结账邀请码')}let r;try{r=await api('/api/entry/redeem',{method:'POST',body:{invite}})}catch(e){$('entry-result').textContent=e.message;throw e}
- if(r.identity_verified||r.door_authorized||r.physical_door_opened||r.payment_required_to_leave)throw Error('领取结账会话不应核验身份或开门');
- state.token=r.guest_token;sessionStorage.setItem('retail_guest',state.token);
- $('invite-token').value='';$('entry-result').textContent='已领取员工发放的结账会话；不会打开门禁。identity_verified=false · door_authorized=false · physical_door_opened=false';
- await showEntryStatus();await loadProducts();toast('已领取有效结账会话');armBarcodeField();
+ const invite=$('invite-token').value.trim();if(!invite){$('entry-result').textContent='请填写店员发给的结账邀请码。这不是身份核验，也不会开门。';throw Error('请填写店员发给的结账邀请码')}
+ await redeemStaffInvite(invite,'已领取员工发放的结账会话；不会打开门禁。identity_verified=false · door_authorized=false · physical_door_opened=false','已领取有效结账会话');
 });
 const inviteFromUrl=new URLSearchParams(location.search).get('invite');
 if(inviteFromUrl){history.replaceState(null,'',location.pathname);$('invite-token').value=inviteFromUrl;
- run(async()=>{const r=await api('/api/entry/redeem',{method:'POST',body:{invite:inviteFromUrl}});
- state.token=r.guest_token;sessionStorage.setItem('retail_guest',state.token);$('invite-token').value='';
- $('entry-result').textContent='结账会话已领取；这不是进店权限。';await showEntryStatus();await loadProducts();toast('结账会话已激活');armBarcodeField()});}
+ run(()=>redeemStaffInvite(inviteFromUrl,'结账会话已领取；这不是进店权限。','结账会话已激活'));}
 $('issue-invite').onclick=()=>run(async()=>{
  if(state.issuing)return;state.issuing=true;$('issue-invite').disabled=true;
  try{const r=await api('/api/admin/checkout-invite',{admin:true,method:'POST'});
