@@ -227,7 +227,7 @@ class HelpStatus(BaseModel):
     status:str
 class StoreSettingsInput(BaseModel):
     low_stock_threshold:Any=None
-    timezone:str|None=Field(default=None,min_length=1,max_length=64)
+    timezone:Any=None
 
 
 def create_app(settings:Settings|None=None)->FastAPI:
@@ -1166,19 +1166,24 @@ def create_app(settings:Settings|None=None)->FastAPI:
         """Staff threshold and business-day timezone. No door or payment side effects."""
         threshold_given='low_stock_threshold' in payload.model_fields_set
         threshold=require_low_stock_threshold(payload.low_stock_threshold) if threshold_given else None
-        if threshold is None and payload.timezone is None:
+        zone=None
+        if 'timezone' in payload.model_fields_set:
+            text=payload.timezone.strip() if isinstance(payload.timezone,str) else ''
+            if not text or len(text)>64:
+                abort(422,'无法识别的时区名称，例如 Asia/Shanghai')
+            zone=text
+            load_zone(zone)
+        if threshold is None and zone is None:
             abort(422,'请提供低库存阈值或门店时区')
-        if payload.timezone is not None:
-            load_zone(payload.timezone)
         with db.tx() as c:
             if threshold is not None:
                 c.execute('''INSERT INTO store_settings(key,value) VALUES('low_stock_threshold',?)
                              ON CONFLICT(key) DO UPDATE SET value=excluded.value''',(str(threshold),))
-            if payload.timezone is not None:
+            if zone is not None:
                 c.execute('''INSERT INTO store_settings(key,value) VALUES('store_timezone',?)
-                             ON CONFLICT(key) DO UPDATE SET value=excluded.value''',(payload.timezone,))
+                             ON CONFLICT(key) DO UPDATE SET value=excluded.value''',(zone,))
             db.audit(c,actor,'STORE_SETTINGS',
-                     f"threshold={threshold};timezone={payload.timezone or ''}")
+                     f"threshold={threshold};timezone={zone or ''}")
             stored=int(c.execute("SELECT value FROM store_settings WHERE key='low_stock_threshold'").fetchone()['value'])
             zone_name=c.execute("SELECT value FROM store_settings WHERE key='store_timezone'").fetchone()['value']
         return {'low_stock_threshold':stored,'store_timezone':zone_name,
