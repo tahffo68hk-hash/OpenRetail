@@ -1,5 +1,7 @@
 # V2 验证记录（2026-11-04）
 
+> 2026-11-06 的复核在 [`PROJECT_STATUS.md`](PROJECT_STATUS.md)。下文是历史记录：其中的 27/27 已被后来增加的测试超过，当前计数以那次实际运行的 pytest 输出为准。文中「尚未执行线下恢复演练」也只描述 2026-11-04；同日之后的隔离恢复见项目状态文档。
+
 - 27/27 pytest 测试通过（V1回归 + V2交易/安全/迁移/离线支付签名）。
 - `python -m compileall -q openretail scripts`、`node --check web/app.js` 通过。
 - FastAPI 本地 HTTP 服务 `/api/health` 返回 200；SQLite `PRAGMA quick_check=ok`。

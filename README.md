@@ -127,7 +127,16 @@ OSPOS 的特殊 LICENSE 署名条件、ERPNext 的 GPLv3 和其他上游许可�
 - 正式手机支付/支付宝、退款和结算对账、远程人工客服、手机号/身份核验、真实可控门禁、商品级防损、ERP 双向实时一致性、生产数据库 HA 均不是当前完成项。
 - 安全门禁、收款资质、视频隐私、网络部署和财务对账必须结合实际地址、门体、商户与设备条件验收。
 
-详细路径：`docs/ARCHITECTURE.md`、`docs/PRODUCTION_GATE.md`、`docs/AGENT_HANDOFF.md`。
+详细路径：`docs/ARCHITECTURE.md`、`docs/AGENT_HANDOFF.md`。
+
+2026-11-06 根据源码和当次运行写的长期管理文档（中文，区分已核实和未核实）：
+
+- [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md)
+- [`docs/DECISIONS.md`](docs/DECISIONS.md)
+- [`docs/API_INVENTORY.md`](docs/API_INVENTORY.md)
+- [`docs/HARDWARE_PLAN.md`](docs/HARDWARE_PLAN.md)
+- [`docs/PRODUCTION_GATE.md`](docs/PRODUCTION_GATE.md)
+- [`docs/TECH_ROADMAP.md`](docs/TECH_ROADMAP.md)
 
 ## 8. 浏览器隔离交互验证（可选）
 

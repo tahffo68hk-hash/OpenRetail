@@ -127,7 +127,16 @@ Check OSPOS's special LICENSE attribution, ERPNext's GPLv3, and the other upstre
 - Live mobile WeChat or Alipay, refunds and settlement reconciliation, remote customer service, phone or identity verification, a controllable door, item-level loss prevention, bidirectional ERP consistency, and production database HA are not done.
 - Door safety, payment qualification, video privacy, network deployment, and financial reconciliation must be accepted against the real address, door, merchant, and devices.
 
-See `docs/ARCHITECTURE.md`, `docs/PRODUCTION_GATE.md`, and `docs/AGENT_HANDOFF.md`.
+See `docs/ARCHITECTURE.md` and `docs/AGENT_HANDOFF.md`.
+
+Long-term management notes from the 2026-11-06 source check are in Chinese and separate what was re-run from what was only claimed:
+
+- [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md)
+- [`docs/DECISIONS.md`](docs/DECISIONS.md)
+- [`docs/API_INVENTORY.md`](docs/API_INVENTORY.md)
+- [`docs/HARDWARE_PLAN.md`](docs/HARDWARE_PLAN.md)
+- [`docs/PRODUCTION_GATE.md`](docs/PRODUCTION_GATE.md)
+- [`docs/TECH_ROADMAP.md`](docs/TECH_ROADMAP.md)
 
 ## 8. Optional isolated browser check
 
