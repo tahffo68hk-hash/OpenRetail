@@ -202,6 +202,13 @@ with TestClient(create_app(cfg)) as backend,sync_playwright() as pw:
  p.locator('#edit-form button[type="submit"]').click()
  p.wait_for_function("document.querySelector('#product-status').textContent.includes('库存仍为 4')")
  p.locator('#adjust-form input[name="barcode"]').fill('6900000099991')
+ p.locator('#adjust-form input[name="delta"]').evaluate("el => { el.value='0'; }")
+ p.locator('#adjust-form button[type="submit"]').click()
+ p.wait_for_function("document.querySelector('#product-status').textContent==='调整数量不能为 0' && document.querySelector('#toast').textContent.includes('调整数量不能为 0')")
+ with backend.app.state.db.connect() as conn:
+  assert conn.execute("SELECT stock FROM products WHERE barcode='6900000099991'").fetchone()['stock']==4
+  assert conn.execute("SELECT COUNT(*) n FROM audit_events WHERE action='STOCK_ADJUST' AND detail LIKE '6900000099991:%'").fetchone()['n']==0
+ p.locator('#adjust-form input[name="barcode"]').fill('6900000099991')
  p.locator('#adjust-form input[name="delta"]').fill('2')
  p.locator('#adjust-form select[name="reason"]').select_option('到货入库')
  p.locator('#adjust-form button[type="submit"]').click()

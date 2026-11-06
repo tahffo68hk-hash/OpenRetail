@@ -74,6 +74,22 @@ def require_price_cents(value):
     if value>100_000_000:abort(422,'售价超出上限')
     return value
 
+def require_quantity_delta(value):
+    """A stock adjustment must be a non-zero integer. Empty, zero, and junk are not a change."""
+    if isinstance(value,str):
+        text=value.strip()
+        if not text or text in ('+','-'):abort(422,'调整数量不能为 0')
+        sign=-1 if text[0]=='-' else 1
+        digits=text[1:] if text[0] in '+-' else text
+        if not digits.isdigit():abort(422,'调整数量不能为 0')
+        value=sign*int(digits)
+    elif isinstance(value,float):
+        if not value.is_integer():abort(422,'调整数量不能为 0')
+        value=int(value)
+    if isinstance(value,bool) or not isinstance(value,int) or value==0 or value<-100_000 or value>100_000:
+        abort(422,'调整数量不能为 0')
+    return value
+
 def contains_like(text:str)->str:
     # Literal substring. % and _ in a barcode or name stay characters, not wildcards.
     escaped=text.replace('\\','\\\\').replace('%','\\%').replace('_','\\_')
@@ -189,7 +205,7 @@ class FrigateMessage(BaseModel):
     after:dict|None=None
     before:dict|None=None
 class StockChange(BaseModel):
-    quantity_delta:int=Field(ge=-100_000,le=100_000)
+    quantity_delta:Any=None
     reason:str=Field(min_length=4,max_length=120)
 class HelpInput(BaseModel):
     message:str=Field(min_length=0,max_length=400)
@@ -1240,19 +1256,20 @@ def create_app(settings:Settings|None=None)->FastAPI:
 
     @app.post('/api/admin/products/{product_id}/adjust-stock')
     def adjust_stock(product_id:int,payload:StockChange, actor:str=Depends(admin)):
-        if payload.quantity_delta==0:abort(422,'调整数量不能为 0')
+        delta=require_quantity_delta(payload.quantity_delta)
         with db.tx() as c:
             p=c.execute('SELECT * FROM products WHERE id=?',(product_id,)).fetchone()
             if not p:abort(404,'商品不存在')
-            new=p['stock']+payload.quantity_delta
+            new=p['stock']+delta
             # On-hand floor is the quantity already reserved for unpaid orders, and never below zero.
             if new<0 or new<p['reserved_stock']:
                 abort(409,'库存调整会低于可售底线或侵占未结算预留')
             c.execute('UPDATE products SET stock=? WHERE id=?',(new,product_id))
-            db.movement(c,product_id,payload.quantity_delta,0,payload.reason,'MANUAL')
-            db.audit(c,actor,'STOCK_ADJUST',f'{p["barcode"]}:{payload.quantity_delta}')
+            db.movement(c,product_id,delta,0,payload.reason,'MANUAL')
+            db.audit(c,actor,'STOCK_ADJUST',f'{p["barcode"]}:{delta}')
         return {'product_id':product_id,'stock':new,'reserved_stock':p['reserved_stock'],
-                'reason':payload.reason,'system_of_record':'sqlite'}
+                'reason':payload.reason,'system_of_record':'sqlite','physical_door_opened':False,
+                'identity_verified':False,'door_authorized':False}
 
     @app.post('/api/admin/import-products',dependencies=[Depends(admin)])
     async def import_products(file:UploadFile=File(...),dry_run:bool=Query(True)):
