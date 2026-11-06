@@ -1,5 +1,6 @@
 MIT License
 
+Copyright (c) 2026 zmjjyy
 Copyright (c) 2026 OpenRetail V1 project contributors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -20,5 +21,5 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-This license covers ONLY original OpenRetail V1 integration code in this package.
+This license covers ONLY original OpenRetail integration code in this package.
 It does not override licenses or trademarks of upstream third-party projects.
