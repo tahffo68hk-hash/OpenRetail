@@ -7,7 +7,8 @@ allowed only with separately configured WeChat Native merchant credentials.
 import hashlib
 import sys
 import base64
-from datetime import datetime, timezone
+from datetime import datetime
+from zoneinfo import ZoneInfo
 import io
 import qrcode
 import hmac
@@ -34,6 +35,17 @@ from .importer import parse_catalog,write_catalog,ImportErrorDetail
 ROOT=Path(__file__).resolve().parent.parent
 
 def now()->int:return int(time.time())
+
+def load_zone(name:str)->ZoneInfo:
+    try:return ZoneInfo(name)
+    except Exception:
+        abort(422,'无法识别的时区名称，例如 Asia/Shanghai')
+
+def local_day_start(zone:ZoneInfo)->int:
+    # Aware local midnight. Stored order times stay UTC epoch seconds.
+    local_now=datetime.now(zone)
+    start=local_now.replace(hour=0,minute=0,second=0,microsecond=0)
+    return int(start.timestamp())
 def abort(status:int,message:str):raise HTTPException(status_code=status,detail=message)
 def asdict(row):return dict(row) if row is not None else None
 
@@ -75,6 +87,9 @@ class HelpInput(BaseModel):
     order_id:str|None=Field(default=None,max_length=64)
 class HelpStatus(BaseModel):
     status:str
+class StoreSettingsInput(BaseModel):
+    low_stock_threshold:int|None=Field(default=None,ge=1,le=10_000)
+    timezone:str|None=Field(default=None,min_length=1,max_length=64)
 
 
 def create_app(settings:Settings|None=None)->FastAPI:
@@ -729,8 +744,11 @@ def create_app(settings:Settings|None=None)->FastAPI:
             review=c.execute("SELECT COUNT(*) n FROM orders WHERE status='PAYMENT_REVIEW'").fetchone()['n']
             entry=c.execute('SELECT COUNT(*) n FROM door_events').fetchone()['n']
             incidents=c.execute('SELECT COUNT(*) n FROM incidents').fetchone()['n']
-            day=datetime.now(timezone.utc).replace(hour=0,minute=0,second=0,microsecond=0)
-            day_start=int(day.timestamp())
+            zone_row=c.execute("SELECT value FROM store_settings WHERE key='store_timezone'").fetchone()
+            zone_name=zone_row['value'] if zone_row and zone_row['value'] else 'Asia/Shanghai'
+            try:zone=ZoneInfo(zone_name)
+            except Exception:abort(500,'门店时区配置无效')
+            day_start=local_day_start(zone)
             today_orders=c.execute('SELECT COUNT(*) n FROM orders WHERE created_at>=?',(day_start,)).fetchone()['n']
             today_paid=c.execute("SELECT COALESCE(SUM(total_cents),0) n FROM orders WHERE status='PAID' AND paid_at>=?",(day_start,)).fetchone()['n']
             today_real=c.execute('''SELECT COALESCE(SUM(o.total_cents),0) n FROM orders o
@@ -752,7 +770,8 @@ def create_app(settings:Settings|None=None)->FastAPI:
                 'today_order_count':today_orders,
                 'today_simulated_revenue_cents':today_paid-today_real,
                 'today_verified_revenue_cents':today_real,
-                'today_basis':'UTC calendar day',
+                'today_basis':zone_name+' calendar day',
+                'store_timezone':zone_name,
                 'help_needs_attention':help_open+help_ack,
                 'help_open':help_open,'help_acknowledged':help_ack,'help_resolved':help_resolved,
                 'low_stock_threshold':threshold,
@@ -767,6 +786,27 @@ def create_app(settings:Settings|None=None)->FastAPI:
             c.execute("UPDATE store_settings SET value=? WHERE key='mode'",(payload.mode,))
             db.audit(c,'operator','MODE_SET',payload.mode)
         return {'mode':payload.mode,'physical_door_affected':False}
+
+    @app.put('/api/admin/store-settings',dependencies=[Depends(admin)])
+    def update_store_settings(payload:StoreSettingsInput):
+        """Staff threshold and business-day timezone. No door or payment side effects."""
+        if payload.low_stock_threshold is None and payload.timezone is None:
+            abort(422,'请提供低库存阈值或门店时区')
+        if payload.timezone is not None:
+            load_zone(payload.timezone)
+        with db.tx() as c:
+            if payload.low_stock_threshold is not None:
+                c.execute('''INSERT INTO store_settings(key,value) VALUES('low_stock_threshold',?)
+                             ON CONFLICT(key) DO UPDATE SET value=excluded.value''',(str(payload.low_stock_threshold),))
+            if payload.timezone is not None:
+                c.execute('''INSERT INTO store_settings(key,value) VALUES('store_timezone',?)
+                             ON CONFLICT(key) DO UPDATE SET value=excluded.value''',(payload.timezone,))
+            db.audit(c,'operator','STORE_SETTINGS',
+                     f"threshold={payload.low_stock_threshold};timezone={payload.timezone or ''}")
+            threshold=int(c.execute("SELECT value FROM store_settings WHERE key='low_stock_threshold'").fetchone()['value'])
+            zone_name=c.execute("SELECT value FROM store_settings WHERE key='store_timezone'").fetchone()['value']
+        return {'low_stock_threshold':threshold,'store_timezone':zone_name,
+                'physical_door_opened':False,'real_door_enabled':False}
 
     @app.get('/api/admin/products',dependencies=[Depends(admin)])
     def admin_products():
