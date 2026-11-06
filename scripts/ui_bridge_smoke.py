@@ -66,6 +66,7 @@ with TestClient(create_app(cfg)) as backend,sync_playwright() as pw:
  p.locator('#admin-key').fill('A'*40)
  p.locator('#admin-login').click()
  p.wait_for_function("!document.querySelector('#admin-body').hidden")
+ p.wait_for_function("document.querySelector('#holding-list').textContent.includes('没有占用库存的未付款订单')")
  print('admin:',p.locator('#m-orders').inner_text(),'real:',p.locator('#m-real').inner_text(),'errors:',errors)
  p.wait_for_function("document.querySelector('#help-list').textContent.includes('请到货架帮忙')")
  p.wait_for_function("document.querySelector('#door-event-list').textContent.includes('SESSION_ISSUED')")

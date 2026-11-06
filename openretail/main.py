@@ -694,22 +694,32 @@ def create_app(settings:Settings|None=None)->FastAPI:
                 raise RuntimeError('mock settlement lost its unverified marker')
             return mock_body(code='SUCCESS',outcome=outcome,order_status='PAID',event_id=payload.event_id)
 
-    @app.post('/api/admin/orders/{order_id}/mock-close',dependencies=[Depends(admin)])
-    def mock_close(order_id:str):
+    def close_holding_order(c, order_id, actor):
+        """Release a local unpaid hold. External PAYMENT_PENDING stays reserved."""
+        row=c.execute('SELECT * FROM orders WHERE id=?',(order_id,)).fetchone()
+        if not row:abort(404,'订单不存在')
+        if row['status'] in ('CANCELLED','EXPIRED'):
+            return mock_body(order_id=order_id,outcome='IDEMPOTENT',trade_state='CLOSED',order_status=row['status'],
+                             stock_changed=False,physical_door_opened=False)
+        if row['status']=='PAID':abort(409,'已模拟支付的订单不能关单，如需退回库存请使用模拟退款')
+        if row['status']=='REFUNDED':abort(409,'订单已模拟退款')
+        local_pending=row['status']=='PENDING' or (row['status']=='PAYMENT_PENDING' and str(row['payment_reference'] or '').startswith('mock:'))
+        if not local_pending:abort(409,'外部支付单请使用微信查单关单，模拟关单不会访问微信')
+        stock_before=c.execute('SELECT COALESCE(SUM(stock),0) n FROM products').fetchone()['n']
+        db.release(c,order_id,'MOCK_CLOSED')
+        cur=c.execute("UPDATE orders SET status='CANCELLED' WHERE id=? AND status IN ('PENDING','PAYMENT_PENDING')",(order_id,))
+        if cur.rowcount!=1:raise RuntimeError('close lost the unpaid row')
+        stock_after=c.execute('SELECT COALESCE(SUM(stock),0) n FROM products').fetchone()['n']
+        if stock_before!=stock_after:raise RuntimeError('close changed on-hand stock')
+        db.audit(c,actor,'ORDER_CLOSED',order_id)
+        return mock_body(order_id=order_id,outcome='CLOSED',trade_state='CLOSED',order_status='CANCELLED',
+                         stock_changed=False,physical_door_opened=False)
+
+    @app.post('/api/admin/orders/{order_id}/mock-close')
+    def mock_close(order_id:str, actor:str=Depends(admin)):
         mock_enabled()
         with db.tx() as c:
-            row=c.execute('SELECT * FROM orders WHERE id=?',(order_id,)).fetchone()
-            if not row:abort(404,'订单不存在')
-            if row['status'] in ('CANCELLED','EXPIRED'):
-                return mock_body(order_id=order_id,outcome='IDEMPOTENT',trade_state='CLOSED',order_status=row['status'])
-            if row['status']=='PAID':abort(409,'已模拟支付的订单不能关单，如需退回库存请使用模拟退款')
-            if row['status']=='REFUNDED':abort(409,'订单已模拟退款')
-            local_pending=row['status']=='PENDING' or (row['status']=='PAYMENT_PENDING' and str(row['payment_reference'] or '').startswith('mock:'))
-            if not local_pending:abort(409,'外部支付单请使用微信查单关单，模拟关单不会访问微信')
-            db.release(c,order_id,'MOCK_CLOSED')
-            c.execute("UPDATE orders SET status='CANCELLED' WHERE id=? AND status IN ('PENDING','PAYMENT_PENDING')",(order_id,))
-            db.audit(c,'operator','MOCK_CLOSED',order_id)
-            return mock_body(order_id=order_id,outcome='CLOSED',trade_state='CLOSED',order_status='CANCELLED')
+            return close_holding_order(c,order_id,actor)
 
     @app.post('/api/admin/orders/{order_id}/reconcile-mock',dependencies=[Depends(admin)])
     def reconcile_mock(order_id:str):
@@ -1138,6 +1148,30 @@ def create_app(settings:Settings|None=None)->FastAPI:
         body=write_catalog(rows)
         return Response(body,media_type='text/csv; charset=utf-8',
                         headers={'Content-Disposition':'attachment; filename="openretail-products.csv"'})
+
+    @app.get('/api/admin/orders/holding')
+    def holding_orders(actor:str=Depends(admin)):
+        """Unpaid orders that still reserve stock. Read-only; closing is a separate action."""
+        with db.connect() as c:
+            zone_name,zone=store_zone(c)
+            rows=c.execute('''SELECT o.id,o.status,o.total_cents,o.created_at,o.paid_at,o.payment_reference,
+                (SELECT provider FROM payments WHERE order_id=o.id ORDER BY created_at DESC LIMIT 1) provider,
+                (SELECT verified FROM payments WHERE order_id=o.id ORDER BY created_at DESC LIMIT 1) verified,
+                (SELECT group_concat(name || ' x' || quantity, '、') FROM order_lines WHERE order_id=o.id) items
+                FROM orders o WHERE o.status IN ('PENDING','PAYMENT_PENDING') ORDER BY o.created_at DESC''').fetchall()
+            listed=[]
+            for row in rows:
+                item=present_order(row,zone_name,zone)
+                ref=row['payment_reference'] or ''
+                closable=row['status']=='PENDING' or (row['status']=='PAYMENT_PENDING' and ref.startswith('mock:'))
+                item['money_label']='UNPAID'
+                item['real_money']=False
+                item['unpaid']=True
+                item['closable']=closable
+                item['note']='未付款 · 非真实资金' if closable else '外部支付占用，不能在这里释放'
+                listed.append(item)
+        return {'timezone':zone_name,'orders':listed,'physical_door_opened':False,
+                'payment_required_to_leave':False,'real_door_enabled':False}
 
     @app.get('/api/admin/orders')
     def admin_orders(today:bool=Query(default=False), date:str|None=Query(default=None),
