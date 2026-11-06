@@ -57,6 +57,11 @@ def store_zone(c):
     try:return name,ZoneInfo(name)
     except Exception:abort(500,'门店时区配置无效')
 
+def contains_like(text:str)->str:
+    # Literal substring. % and _ in a barcode or name stay characters, not wildcards.
+    escaped=text.replace('\\','\\\\').replace('%','\\%').replace('_','\\_')
+    return '%'+escaped+'%'
+
 def format_local(ts,zone:ZoneInfo)->str:
     if ts is None:return ''
     return datetime.fromtimestamp(int(ts),zone).strftime('%Y-%m-%d %H:%M')
@@ -858,8 +863,28 @@ def create_app(settings:Settings|None=None)->FastAPI:
                 'physical_door_opened':False,'real_door_enabled':False}
 
     @app.get('/api/admin/products',dependencies=[Depends(admin)])
-    def admin_products():
-        with db.connect() as c:return [asdict(r) for r in c.execute('SELECT * FROM products ORDER BY id')]
+    def admin_products(q:str=Query(default=''), listing:str=Query(default='all'), low_stock:bool=Query(default=False)):
+        """Find SKUs already in this SQLite catalog. Read-only: no stock, door, or payment change."""
+        if listing not in ('all','listed','unlisted'):
+            abort(422,'筛选只能是 all、listed 或 unlisted')
+        needle=q.strip()
+        if len(needle)>80:abort(422,'查找内容过长')
+        with db.connect() as c:
+            threshold_row=c.execute("SELECT value FROM store_settings WHERE key='low_stock_threshold'").fetchone()
+            threshold=int(threshold_row['value']) if threshold_row else 5
+            sql='SELECT * FROM products WHERE 1=1'
+            params=[]
+            if needle:
+                sql+=" AND (barcode LIKE ? ESCAPE '\\' OR name LIKE ? ESCAPE '\\')"
+                like=contains_like(needle)
+                params.extend([like,like])
+            if listing=='listed':sql+=' AND active=1'
+            elif listing=='unlisted':sql+=' AND active=0'
+            if low_stock:
+                sql+=' AND stock<=?'
+                params.append(threshold)
+            rows=[asdict(r) for r in c.execute(sql+' ORDER BY id',params)]
+        return rows
 
     @app.post('/api/admin/products')
     def create_product(payload:ProductInput, actor:str=Depends(admin)):
