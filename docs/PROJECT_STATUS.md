@@ -4,6 +4,18 @@
 
 完全无人值守经营仍是 **NOT_APPROVED**。示例配置里的真实支付和实体开锁都是关闭的。
 
+## 本增量（模拟扫码开门进行中忽略第二次点击）
+
+已在代码和测试里做到，并在本机复跑：
+
+- 「模拟扫码开门」在第一次请求还没结束时，再点一次不会再发 `/api/door/open`，也不会再写一条 `SIMULATED` 或 `DEMO_ENTRY_OPEN`。请求结束后再点一次，仍可以再试。
+- 默认门店模式仍是 STAFFED。有人值守下点击仍返回「当前非无人值守演示模式」，不写 `SIMULATED` 或 `DEMO_ENTRY_OPEN`。非演示仍返回「无已验证访客身份与现场门禁验收，禁止控制实物门锁」。测试里临时改成无人值守演示后，成功结果仍是 `SIMULATED`，`physical_door_opened`、`identity_verified`、`door_authorized` 都是 false，页面仍是「开门结果：SIMULATED。实际门锁未动作。」和「仅模拟开门成功」。没有调用 `lock.unlock` 或 `lock.open`。测完把模式改回 STAFFED。
+- 演示「生成访客会话」、邀请码、模拟退款，以及「请输入商品条码」「请输入商品名称」「请输入有效售价」没有改。完全无人值守仍是 NOT_APPROVED。
+
+`/tmp/openretail-venv/bin/python -m pytest -q`（工作目录 `/workspace`，Python 3.12.3）：**91 passed，1 warning，10.26s，退出码 0**。警告仍是 Starlette 的 `httpx` TestClient 弃用提示。91 = 上一轮 90 + 本增量 1。
+
+`scripts/ui_bridge_smoke.py` 在去掉密钥环境变量后退出码 0。没有把店切到无人值守，也没有打开实体门。顾客没有领取邀请码。¥2.00 模拟支付仍显示「模拟支付成功 · 非真实资金 · 已扣库存 · ¥2.00」。390 宽 `scrollWidth` 390，1440 宽 `scrollWidth` 1440，`pageerror` 为空。这仍是 Chrome 到 TestClient 的桥，不是真机，也不是真实收款。这条 PR 仍未合并。
+
 ## 本增量（管理端无效售价）
 
 已在代码和测试里做到，并在本机复跑：

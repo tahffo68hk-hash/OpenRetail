@@ -226,6 +226,8 @@ def create_app(settings:Settings|None=None)->FastAPI:
     app.state.redeem_inflight=set()
     app.state.entry_guard=threading.Lock()
     app.state.entry_inflight=False
+    app.state.door_guard=threading.Lock()
+    app.state.door_inflight=set()
     app.state.refund_guard=threading.Lock()
     app.state.refund_inflight=set()
 
@@ -520,14 +522,25 @@ def create_app(settings:Settings|None=None)->FastAPI:
     @app.post('/api/door/open')
     def door_open(sid:str=Depends(guest)):
         if not cfg.demo:abort(503,'无已验证访客身份与现场门禁验收，禁止控制实物门锁')
-        with db.tx() as c:
-            mode=c.execute("SELECT value FROM store_settings WHERE key='mode'").fetchone()['value']
-            if mode!='UNATTENDED':abort(409,'当前非无人值守演示模式')
-            record_virtual_door(c,sid,'SIMULATED','NO PHYSICAL UNLOCK')
-            db.audit(c,'visitor','DEMO_ENTRY_OPEN',sid[:12])
-            status=entry_status(c,sid)
-        return {'result':'SIMULATED','physical_door_opened':False,
-                'note':'只有模拟事件；安全疏散不能依赖支付状态',**status}
+        with app.state.door_guard:
+            if sid in app.state.door_inflight:
+                return {'duplicate':True,'result':None,'physical_door_opened':False,
+                        'identity_verified':False,'door_authorized':False,'events':[]}
+            app.state.door_inflight.add(sid)
+        try:
+            hold=getattr(app.state,'hold_door',None)
+            if hold:hold()
+            with db.tx() as c:
+                mode=c.execute("SELECT value FROM store_settings WHERE key='mode'").fetchone()['value']
+                if mode!='UNATTENDED':abort(409,'当前非无人值守演示模式')
+                record_virtual_door(c,sid,'SIMULATED','NO PHYSICAL UNLOCK')
+                db.audit(c,'visitor','DEMO_ENTRY_OPEN',sid[:12])
+                status=entry_status(c,sid)
+            return {'result':'SIMULATED','physical_door_opened':False,'duplicate':False,
+                    'note':'只有模拟事件；安全疏散不能依赖支付状态',**status}
+        finally:
+            with app.state.door_guard:
+                app.state.door_inflight.discard(sid)
 
     @app.get('/api/entry/status')
     def read_entry_status(sid:str=Depends(guest)):
