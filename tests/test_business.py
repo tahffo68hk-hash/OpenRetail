@@ -23,7 +23,7 @@ def test_unattended_mock_entry_flow(client,admin_header):
     assert ok.status_code==200 and ok.json()['result']=='SIMULATED'
     assert ok.json()['physical_door_opened'] is False
     overview=client.get('/api/admin/overview',headers=admin_header).json()
-    assert overview['door_events']==1
+    assert overview['door_events']==2
 
 
 def test_purchase_and_duplicate_pay(client,admin_header):
@@ -63,7 +63,8 @@ def test_reservation_protects_stock_adjustment_and_avoids_oversell(client,admin_
     order=client.post('/api/orders',headers=first,json={'request_id':'reserve-a-1',
         'lines':[{'product_id':p['id'],'quantity':2}]}).json()
     assert client.get('/api/products').json()[0]['available_stock']==p['stock']-2
-    assert client.post('/api/admin/products',headers=admin_header,json={**p,'stock':1}).status_code==409
+    assert client.post('/api/admin/products/'+str(p['id'])+'/adjust-stock',headers=admin_header,
+        json={'quantity_delta':1-p['stock'],'reason':'count correction'}).status_code==409
     paid=client.post('/api/payments/mock-confirm',headers=first,json={'order_id':order['id']})
     assert paid.status_code==200 and paid.json()['status']=='PAID'
     assert client.get('/api/products').json()[0]['stock']==p['stock']-2
@@ -109,7 +110,8 @@ def test_concurrent_reservations_one_stock(tmp_path,admin_header):
                  integration_key='I'*40,app_secret='S'*40,mock_payments=True)
     with TestClient(create_app(cfg)) as c:
         p=c.get('/api/products').json()[0]
-        assert c.post('/api/admin/products',headers=admin_header,json={**p,'stock':1}).status_code==200
+        assert c.post('/api/admin/products/'+str(p['id'])+'/adjust-stock',headers=admin_header,
+            json={'quantity_delta':1-p['stock'],'reason':'count correction'}).status_code==200
         a=visitor(c);b=visitor(c)
         def reserve(x):
             return c.post('/api/orders',headers=x[0],json={'request_id':x[1],
@@ -129,5 +131,6 @@ def test_example_placeholder_secrets_rejected(tmp_path):
     from openretail.config import Settings
     import pytest
     with pytest.raises(RuntimeError,match='placeholder'):
-        Settings(db_path=str(tmp_path/'x.db'),admin_key='REPLACE_WITH_RANDOM_ADMIN_KEY',
+        Settings(db_path=str(tmp_path/'x.db'),app_mode='staging',mock_payments=False,
+                 admin_key='REPLACE_WITH_RANDOM_ADMIN_KEY',
                  integration_key='I'*40,app_secret='S'*40).validate()

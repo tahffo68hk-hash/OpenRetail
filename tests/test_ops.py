@@ -66,9 +66,34 @@ def test_restore_is_isolated_and_consistent(tmp_path,monkeypatch):
     with pytest.raises(SystemExit,match='拒绝覆盖正在使用的数据库'):
         restore_backup(backup,source)
 
+def test_example_profiles_use_distinct_databases():
+    root=Path(__file__).resolve().parents[1]
+    def db_path(name):
+        for line in (root/name).read_text(encoding='utf-8').splitlines():
+            if line.startswith('DB_PATH='):
+                return line.split('=',1)[1].strip()
+        raise AssertionError(name+' has no DB_PATH')
+    demo,staging,production=db_path('.env.demo.example'),db_path('.env.staging.example'),db_path('.env.production.example')
+    assert db_path('.env.example')==demo
+    assert len({demo,staging,production})==3
+    assert demo.endswith('/demo/openretail.sqlite3')
+    assert staging.endswith('/staging/openretail.sqlite3')
+    assert production.endswith('/production/openretail.sqlite3')
+
+def test_help_request_status_column_defaults_open(tmp_path):
+    path=tmp_path/'legacy-help.sqlite3'
+    with sqlite3.connect(path) as conn:
+        conn.execute('''CREATE TABLE help_requests(
+            id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, order_id TEXT,
+            message TEXT NOT NULL, created_at INTEGER NOT NULL)''')
+        conn.execute("INSERT INTO help_requests(message,created_at) VALUES('old',1)")
+    Database(str(path)).init(demo=False)
+    with sqlite3.connect(path) as conn:
+        assert conn.execute('SELECT status FROM help_requests').fetchone()[0]=='OPEN'
+
 def test_missing_secrets_fail_closed():
     with pytest.raises(RuntimeError,match='init_env'):
-        Settings(admin_key='',integration_key='',app_secret='',app_mode='demo',mock_payments=True).validate()
+        Settings(admin_key='',integration_key='',app_secret='',app_mode='staging',mock_payments=False).validate()
 
 def test_database_directory_path_is_rejected(tmp_path):
     cfg=Settings(db_path=str(tmp_path),app_mode='demo',mock_payments=True,**KEYS)

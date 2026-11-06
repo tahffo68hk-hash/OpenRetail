@@ -18,6 +18,35 @@ def test_ospos_style_csv_import(client,admin_header):
     assert item['price_cents']==1050 and item['stock']==22
 
 
+def test_export_uses_import_columns_and_bad_csv_keeps_stock(client,admin_header):
+    from conftest import visitor
+    def total():
+        return sum(item['stock'] for item in client.get('/api/products').json())
+    before=total()
+    exported=client.get('/api/admin/export-products',headers=admin_header)
+    assert exported.status_code==200
+    assert exported.headers['content-type'].startswith('text/csv')
+    lines=exported.text.splitlines()
+    assert lines[0]=='barcode,name,price,stock'
+    assert len(lines)==9
+    preview=client.post('/api/admin/import-products?dry_run=true',headers=admin_header,
+                        files={'file':('roundtrip.csv',exported.text,'text/csv')})
+    assert preview.status_code==200 and preview.json()['count']==8
+    assert total()==before
+    bad=b'barcode,name,price,stock\n001,Good,1.50,4\n002,Bad,-1,2\n'
+    assert client.post('/api/admin/import-products?dry_run=false',headers=admin_header,
+                       files={'file':('bad.csv',bad,'text/csv')}).status_code==422
+    assert total()==before
+    guest=visitor(client)
+    product=client.get('/api/products').json()[0]
+    assert client.post('/api/orders',headers=guest,json={'request_id':'block-export-reimport',
+        'lines':[{'product_id':product['id'],'quantity':1}]}).status_code==201
+    held=total()
+    assert client.post('/api/admin/import-products?dry_run=false',headers=admin_header,
+                       files={'file':('again.csv',exported.text,'text/csv')}).status_code==409
+    assert total()==held
+
+
 def test_bad_csv_rejected(client,admin_header):
     data=b'barcode,name,price,stock\n001,Pen,-10,3\n'
     resp=client.post('/api/admin/import-products',headers=admin_header,files={'file':('bad.csv',data)})

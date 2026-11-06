@@ -12,7 +12,7 @@
 
 - **商品/货架**：条码、名称、价格、上下架、库存可售数；中文响应式 Web UI、USB 扫码枪输入、部分浏览器 `BarcodeDetector`。
 - **订单**：服务端定价，`request_id` 幂等，单库 `BEGIN IMMEDIATE`，下单即时预留库存，取消/超时释放，结算后同时扣总库存和预留库存，库存流水和订单审计。
-- **支付**：演示模式使用 `MOCK_NOT_REAL_MONEY`；提供微信支付 APIv3 **Native QR 适配器**（RSA-SHA256 请求签名、平台回包/通知验签、AES-256-GCM 通知解密、金额/商户/币种校验、重复通知幂等），人工发起的商户查单与超时关单后释放库存。**未用真实商户凭证完成实付验证，也不含自动退款**。
+- **支付**：演示模式使用 `MOCK_NOT_REAL_MONEY`；提供微信支付 APIv3 **Native QR 适配器**（RSA-SHA256 请求签名、平台回包/通知验签、AES-256-GCM 通知解密、金额/商户/币种校验、重复通知幂等），人工发起的商户查单与超时关单后释放库存。**未用真实商户凭证完成实付验证，也不含微信或支付宝退款。** 演示模式可以本地查单、关单、超时释放、幂等确认，以及模拟退款（只把 SQLite 库存加回，`verified=0`），这些都不会访问 `api.mch.weixin.qq.com`。
 - **管理员**：PBKDF2 密码哈希、HttpOnly/SameSite Cookie、CSRF 保护、失败登录锁定、审计、库存/订单/事件管理；旧 `X-Admin-Key` 仅演示模式可用，正式试点禁用。
 - **店内试点准入**：有人营业时，员工在后台签发 **120秒一次性结账 QR**，顾客扫码兑换1小时购物会话；不代表身份核验，不授权电锁，不能用于无人值守。
 - **门禁**：Home Assistant 连通性/事件适配器，实体开锁始终 **禁止**。演示模式可以模拟门禁动作；断网/断电/应急离店属于现场专业硬件验收项。
@@ -30,7 +30,7 @@
 | `staging` | 有人值守预发 | 拒绝，不能当成真实交易 | 启动时拒绝 |
 | `production` | 正式环境 | 拒绝 | 启动时拒绝，Compose 也强制 `LIVE_DOOR_ENABLED=false` |
 
-示例：`.env.demo.example`、`.env.staging.example`、`.env.production.example`。真实密钥只放在未提交的 `.env`。
+示例：`.env.demo.example`、`.env.staging.example`、`.env.production.example`。三份示例的 `DB_PATH` 分别是 `./data/demo/`、`./data/staging/`、`./data/production/`，避免把演示配置指到另一档的库。真实密钥只放在未提交的 `.env`。
 
 ## 3. Windows 本地启动、停止、备份和恢复
 
@@ -127,7 +127,16 @@ OSPOS 的特殊 LICENSE 署名条件、ERPNext 的 GPLv3 和其他上游许可�
 - 正式手机支付/支付宝、退款和结算对账、远程人工客服、手机号/身份核验、真实可控门禁、商品级防损、ERP 双向实时一致性、生产数据库 HA 均不是当前完成项。
 - 安全门禁、收款资质、视频隐私、网络部署和财务对账必须结合实际地址、门体、商户与设备条件验收。
 
-详细路径：`docs/ARCHITECTURE.md`、`docs/PRODUCTION_GATE.md`、`docs/AGENT_HANDOFF.md`。
+详细路径：`docs/ARCHITECTURE.md`、`docs/AGENT_HANDOFF.md`。
+
+2026-11-06 根据源码和当次运行写的长期管理文档（中文，区分已核实和未核实）：
+
+- [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md)
+- [`docs/DECISIONS.md`](docs/DECISIONS.md)
+- [`docs/API_INVENTORY.md`](docs/API_INVENTORY.md)
+- [`docs/HARDWARE_PLAN.md`](docs/HARDWARE_PLAN.md)
+- [`docs/PRODUCTION_GATE.md`](docs/PRODUCTION_GATE.md)
+- [`docs/TECH_ROADMAP.md`](docs/TECH_ROADMAP.md)
 
 ## 8. 浏览器隔离交互验证（可选）
 
@@ -137,4 +146,4 @@ pip install -r requirements-ui.txt
 python scripts/ui_bridge_smoke.py
 ```
 
-脚本将实际 Chromium 页面中的 HTTP 请求桥接到 FastAPI TestClient，避免测试电脑禁止 localhost 网页导航。它适合离线 UI 回归，但不替代真实域名/HTTPS/手机浏览器/支付终端验收。
+脚本将实际 Chromium 页面中的 HTTP 请求桥接到 FastAPI TestClient，避免测试电脑禁止 localhost 网页导航。它适合离线 UI 回归，但不替代真实域名/HTTPS/手机浏览器/支付终端验收。干净工作区可以直接运行：导入应用不会先要求密钥。真正启动 `uvicorn openretail.main:app` 时，若演示档还没有 `.env`，进程会在内存里生成一次性 `ADMIN_KEY` 并打印到标准错误，不会写进磁盘。预发和正式档仍然缺少配置就拒绝启动。

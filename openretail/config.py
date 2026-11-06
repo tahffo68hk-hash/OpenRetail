@@ -1,6 +1,8 @@
 """Fail-closed runtime configuration. All keys are server-side secrets."""
 from dataclasses import dataclass
 import os
+import secrets
+import sys
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -39,6 +41,20 @@ class Settings:
     wechat_api_url:str='https://api.mch.weixin.qq.com'
     trusted_proxy_tls:bool=flag('TRUSTED_PROXY_TLS')
     approved_store:bool=flag('STORE_SITE_APPROVED')  # not self-certifying on-site acceptance
+
+    def __post_init__(self):
+        # Demo may boot before scripts/init_env.py. Ephemeral keys stay in memory.
+        # Staging and production never receive generated keys.
+        object.__setattr__(self,'demo_secrets_generated',False)
+        if self.profile!='demo':
+            return
+        generated=[]
+        for name in ('admin_key','integration_key','app_secret'):
+            value=getattr(self,name) or ''
+            if len(value)<24 or value.startswith('REPLACE_WITH_'):
+                object.__setattr__(self,name,secrets.token_urlsafe(32))
+                generated.append(name)
+        object.__setattr__(self,'demo_secrets_generated',bool(generated))
 
     @property
     def profile(self)->str:

@@ -12,7 +12,7 @@ Designed for a 20–50 m² daily-goods shop. It integrates the boundaries of **O
 
 - **Catalog:** barcode, name, price, active flag, and sellable stock. Chinese responsive web UI, USB scanner input, and `BarcodeDetector` where the browser supports it.
 - **Orders:** server-side pricing, idempotent `request_id`, single-database `BEGIN IMMEDIATE`, stock reserved at order creation, released on cancel or expiry, and both on-hand and reserved stock reduced at settlement. Stock movements and order audit are recorded.
-- **Payments:** demo mode uses `MOCK_NOT_REAL_MONEY`. A WeChat Pay APIv3 **Native QR adapter** signs requests with RSA-SHA256, verifies platform responses and notifications, decrypts AES-256-GCM payloads, checks amount, merchant, and currency, and treats repeat notifications as idempotent. An operator can query an order or close a timed-out order and release the reservation. **No live merchant credentials have been used, and automatic refunds are not implemented.**
+- **Payments:** demo mode uses `MOCK_NOT_REAL_MONEY`. A WeChat Pay APIv3 **Native QR adapter** signs requests with RSA-SHA256, verifies platform responses and notifications, decrypts AES-256-GCM payloads, checks amount, merchant, and currency, and treats repeat notifications as idempotent. An operator can query an order or close a timed-out order and release the reservation. **No live merchant credentials have been used, and there is no WeChat or Alipay refund.** Demo mode can query, close, time out, confirm idempotently, and mock-refund inside SQLite (`verified=0`). Those calls do not contact `api.mch.weixin.qq.com`.
 - **Admin:** PBKDF2 password hash, HttpOnly/SameSite cookie, CSRF protection, login lockout, audit, and stock, order, and event management. The legacy `X-Admin-Key` works only in demo mode and is disabled for staging and production.
 - **Staffed entry to checkout:** while the store is staffed, an employee issues a **120-second one-time checkout QR**. The customer redeems a one-hour shopping session. This is not identity verification, does not authorize a lock, and cannot be used for unattended operation.
 - **Door:** Home Assistant connectivity and event adapter. Physical unlock stays **prohibited**. Demo mode can simulate a door action. Power loss, network loss, and emergency exit are on-site hardware acceptance items.
@@ -30,7 +30,7 @@ Designed for a 20–50 m² daily-goods shop. It integrates the boundaries of **O
 | `staging` | Staffed pre-production | Rejected; it is not a real sale | Rejected at startup |
 | `production` | Production | Rejected | Rejected at startup; Compose also forces `LIVE_DOOR_ENABLED=false` |
 
-Examples: `.env.demo.example`, `.env.staging.example`, `.env.production.example`. Real secrets belong only in an uncommitted `.env`.
+Examples: `.env.demo.example`, `.env.staging.example`, `.env.production.example`. Their sample `DB_PATH` values point at `./data/demo/`, `./data/staging/`, and `./data/production/` so a copied demo file does not select another profile's database. Real secrets belong only in an uncommitted `.env`.
 
 ## 3. Windows start, stop, backup, and restore
 
@@ -127,7 +127,16 @@ Check OSPOS's special LICENSE attribution, ERPNext's GPLv3, and the other upstre
 - Live mobile WeChat or Alipay, refunds and settlement reconciliation, remote customer service, phone or identity verification, a controllable door, item-level loss prevention, bidirectional ERP consistency, and production database HA are not done.
 - Door safety, payment qualification, video privacy, network deployment, and financial reconciliation must be accepted against the real address, door, merchant, and devices.
 
-See `docs/ARCHITECTURE.md`, `docs/PRODUCTION_GATE.md`, and `docs/AGENT_HANDOFF.md`.
+See `docs/ARCHITECTURE.md` and `docs/AGENT_HANDOFF.md`.
+
+Long-term management notes from the 2026-11-06 source check are in Chinese and separate what was re-run from what was only claimed:
+
+- [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md)
+- [`docs/DECISIONS.md`](docs/DECISIONS.md)
+- [`docs/API_INVENTORY.md`](docs/API_INVENTORY.md)
+- [`docs/HARDWARE_PLAN.md`](docs/HARDWARE_PLAN.md)
+- [`docs/PRODUCTION_GATE.md`](docs/PRODUCTION_GATE.md)
+- [`docs/TECH_ROADMAP.md`](docs/TECH_ROADMAP.md)
 
 ## 8. Optional isolated browser check
 
@@ -137,4 +146,4 @@ pip install -r requirements-ui.txt
 python scripts/ui_bridge_smoke.py
 ```
 
-The script renders the real HTML, CSS, and JavaScript in Chromium and bridges HTTP calls to the FastAPI TestClient. It is for offline UI regression. It does not replace a real domain, HTTPS, a phone browser, or a payment-terminal acceptance test.
+The script renders the real HTML, CSS, and JavaScript in Chromium and bridges HTTP calls to the FastAPI TestClient. It is for offline UI regression. It does not replace a real domain, HTTPS, a phone browser, or a payment-terminal acceptance test. A clean tree can run it: importing the app does not require secrets first. If demo mode is started with uvicorn and no `.env`, the process generates an in-memory `ADMIN_KEY` and prints it to stderr. It is not written to disk. Staging and production still refuse to boot without their required configuration.

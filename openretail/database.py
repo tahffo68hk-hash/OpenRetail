@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS store_settings(key TEXT PRIMARY KEY,value TEXT NOT NU
 CREATE TABLE IF NOT EXISTS orders(
  id TEXT PRIMARY KEY,session_id TEXT NOT NULL REFERENCES guest_sessions(id),
  request_id TEXT NOT NULL,fingerprint TEXT NOT NULL,
- status TEXT NOT NULL CHECK(status IN ('PENDING','PAYMENT_PENDING','PAID','EXPIRED','CANCELLED','PAYMENT_REVIEW')),
+ status TEXT NOT NULL CHECK(status IN ('PENDING','PAYMENT_PENDING','PAID','EXPIRED','CANCELLED','PAYMENT_REVIEW','REFUNDED')),
  total_cents INTEGER NOT NULL CHECK(total_cents>=0),
  created_at INTEGER NOT NULL,expires_at INTEGER NOT NULL,paid_at INTEGER,
  payment_reference TEXT, UNIQUE(session_id,request_id)
@@ -64,6 +64,11 @@ CREATE TABLE IF NOT EXISTS payment_notifications(
  event_id TEXT PRIMARY KEY,provider TEXT NOT NULL,order_id TEXT NOT NULL,
  outcome TEXT NOT NULL,received_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS refunds(
+ id TEXT PRIMARY KEY,order_id TEXT NOT NULL UNIQUE REFERENCES orders(id),
+ provider TEXT NOT NULL,amount_cents INTEGER NOT NULL CHECK(amount_cents>=0),
+ created_at INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS admin_sessions(
  token_hash TEXT PRIMARY KEY,csrf_hash TEXT NOT NULL,
  created_at INTEGER NOT NULL,expires_at INTEGER NOT NULL
@@ -73,6 +78,14 @@ CREATE TABLE IF NOT EXISTS login_attempts(
 );
 CREATE TABLE IF NOT EXISTS checkout_invites(
  invite_hash TEXT PRIMARY KEY,created_at INTEGER NOT NULL,expires_at INTEGER NOT NULL,consumed_at INTEGER
+);
+CREATE TABLE IF NOT EXISTS help_requests(
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ session_id TEXT,
+ order_id TEXT,
+ message TEXT NOT NULL,
+ created_at INTEGER NOT NULL,
+ status TEXT NOT NULL DEFAULT 'OPEN' CHECK(status IN ('OPEN','ACKNOWLEDGED','RESOLVED'))
 );
 CREATE INDEX IF NOT EXISTS idx_orders_status_exp ON orders(status,expires_at);
 CREATE INDEX IF NOT EXISTS idx_orders_session ON orders(session_id,created_at);
@@ -125,18 +138,21 @@ class Database:
             if cols and 'reserved_stock' not in cols:c.execute('ALTER TABLE products ADD COLUMN reserved_stock INTEGER NOT NULL DEFAULT 0')
             cols={x['name'] for x in c.execute('PRAGMA table_info(guest_sessions)')}
             if cols and 'verified_identity_hash' not in cols:c.execute('ALTER TABLE guest_sessions ADD COLUMN verified_identity_hash TEXT')
+            help_cols={x['name'] for x in c.execute('PRAGMA table_info(help_requests)')}
+            if help_cols and 'status' not in help_cols:
+                c.execute("ALTER TABLE help_requests ADD COLUMN status TEXT NOT NULL DEFAULT 'OPEN'")
             cols={x['name'] for x in c.execute('PRAGMA table_info(orders)')}
             if cols and 'payment_reference' not in cols:c.execute('ALTER TABLE orders ADD COLUMN payment_reference TEXT')
             order_table=c.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='orders'").fetchone()
-            if order_table and 'PAYMENT_PENDING' not in order_table['sql']:
-                # Rebuild V1 CHECK constraint; preserve orders and existing foreign-key relations.
+            if order_table and ('PAYMENT_PENDING' not in order_table['sql'] or 'REFUNDED' not in order_table['sql']):
+                # Rebuild the CHECK constraint; preserve orders and existing foreign-key relations.
                 c.execute('PRAGMA foreign_keys=OFF')
                 try:
                     c.execute('BEGIN EXCLUSIVE')
                     c.execute('''CREATE TABLE orders_v2(
                       id TEXT PRIMARY KEY,session_id TEXT NOT NULL REFERENCES guest_sessions(id),
                       request_id TEXT NOT NULL,fingerprint TEXT NOT NULL,
-                      status TEXT NOT NULL CHECK(status IN ('PENDING','PAYMENT_PENDING','PAID','EXPIRED','CANCELLED','PAYMENT_REVIEW')),
+                      status TEXT NOT NULL CHECK(status IN ('PENDING','PAYMENT_PENDING','PAID','EXPIRED','CANCELLED','PAYMENT_REVIEW','REFUNDED')),
                       total_cents INTEGER NOT NULL CHECK(total_cents>=0),created_at INTEGER NOT NULL,
                       expires_at INTEGER NOT NULL,paid_at INTEGER,payment_reference TEXT,
                       UNIQUE(session_id,request_id))''')
@@ -155,8 +171,18 @@ class Database:
             c.executescript(SCHEMA)
         with self.tx() as c:
             c.execute("INSERT OR IGNORE INTO store_settings(key,value) VALUES('mode','STAFFED')")
+            # On-hand book quantity at or below this value is the store-wide low-stock list.
+            c.execute("INSERT OR IGNORE INTO store_settings(key,value) VALUES('low_stock_threshold','5')")
+            c.execute("INSERT OR IGNORE INTO store_settings(key,value) VALUES('store_timezone','Asia/Shanghai')")
             if demo and not c.execute('SELECT 1 FROM products LIMIT 1').fetchone():
                 c.executemany('INSERT INTO products(barcode,name,price_cents,stock) VALUES(?,?,?,?)',SEED)
+            # SQLite in this repository is the inventory system of record. Products
+            # that have never posted a movement get one opening row so later
+            # sums can be reconciled. Rows that already have history are not rewritten.
+            missing=c.execute('''SELECT id,stock,reserved_stock FROM products p
+                WHERE NOT EXISTS (SELECT 1 FROM stock_movements m WHERE m.product_id=p.id)''').fetchall()
+            for product in missing:
+                Database.movement(c,product['id'],product['stock'],product['reserved_stock'],'OPENING_BALANCE','SQLITE_SOR')
 
     @staticmethod
     def audit(c,actor:str,action:str,detail:str):
@@ -178,10 +204,15 @@ class Database:
 
     @staticmethod
     def expire(c,timestamp:int)->int:
-        """Expire ONLY orders that never entered the external payment gateway.
-        PAYMENT_PENDING requires provider query/close reconciliation, not a timer.
+        """Release stock for local orders that cannot have taken real money.
+
+        PENDING never reached a gateway. PAYMENT_PENDING is released only when
+        payment_reference starts with mock: (the in-process sandbox). A WeChat
+        PAYMENT_PENDING row stays reserved until provider query/close.
         """
-        rows=c.execute("SELECT id FROM orders WHERE status='PENDING' AND expires_at<=?",(timestamp,)).fetchall()
+        rows=c.execute('''SELECT id FROM orders WHERE expires_at<=? AND (
+                            status='PENDING' OR (status='PAYMENT_PENDING' AND payment_reference LIKE 'mock:%')
+                          )''',(timestamp,)).fetchall()
         for row in rows:
             Database.release(c,row['id'],'ORDER_EXPIRED')
             c.execute("UPDATE orders SET status='EXPIRED' WHERE id=?",(row['id'],))

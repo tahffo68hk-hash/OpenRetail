@@ -52,8 +52,8 @@ def assess(path:Path)->dict:
     return {'integrity':integrity,'products':products,'orders':orders,'paid_orders':paid,
             'problems':problems,'ok':not problems}
 
-def restore_backup(backup:Path,dest:Path)->dict:
-    backup=backup.resolve();dest=dest.resolve();live=live_database()
+def restore_backup(backup:Path,dest:Path,live:Path|None=None)->dict:
+    backup=backup.resolve();dest=dest.resolve();live=(Path(live).resolve() if live else live_database())
     if not backup.is_file():raise SystemExit(f'找不到备份: {backup}')
     if dest==live:raise SystemExit(f'拒绝覆盖正在使用的数据库: {live}')
     if dest==backup:raise SystemExit('恢复目标不能与备份文件相同')
