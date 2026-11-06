@@ -4,6 +4,19 @@
 
 完全无人值守经营仍是 **NOT_APPROVED**。示例配置里的真实支付和实体开锁都是关闭的。
 
+## 本增量（结账邀请码的失败提示和审计）
+
+已在代码和测试里做到，并在本机复跑：
+
+- 非演示门店里，没有会话的顾客不能自己开访客会话。页面和接口都会提示向店员领取结账邀请码，并写明这不是身份核验，也不会开门。`/api/public/store` 的 `invite_required` 在非演示时为 true。
+- 过期码返回「邀请码已过期」，用过的码返回「邀请码已使用」。这两种都不会新建会话。成功领取仍是 identity_verified=false、door_authorized=false、physical_door_opened=false。
+- 创建邀请码追加 `INVITE_CREATED`，只记 120 秒有效期和管理员身份，不记邀请码本身。这次记录不改库存、不开门、不调用支付机构。
+- 演示里的「生成访客会话」仍然不需要邀请码。
+
+`/tmp/openretail-venv/bin/python -m pytest -q`（工作目录 `/workspace`，Python 3.12.3）：**70 passed，1 warning，7.38s，退出码 0**。警告仍是 Starlette 的 `httpx` TestClient 弃用提示。70 = 上一轮 69 + 本增量 1。
+
+`scripts/ui_bridge_smoke.py` 在去掉密钥环境变量后退出码 0。顾客没有领取邀请码，仍用「生成访客会话」完成 ¥2.00 模拟支付，并含「模拟支付成功 · 非真实资金」。管理页仍能创建邀请码。390 宽 `scrollWidth` 390，1440 宽 `scrollWidth` 1440，`pageerror` 为空。这仍是 Chrome 到 TestClient 的桥，不是真机，也不是身份核验或真实收款。
+
 ## 本增量（有人值守的结账邀请码）
 
 已在代码和测试里做到，并在本机复跑：

@@ -363,6 +363,8 @@ def create_app(settings:Settings|None=None)->FastAPI:
         with db.connect() as c:
             mode=c.execute("SELECT value FROM store_settings WHERE key='mode'").fetchone()['value']
         return {'name':'OpenRetail 自建超市','store_mode':mode,'demo':cfg.demo,
+                'invite_required':not cfg.demo,
+                'identity_verified':False,'door_authorized':False,'physical_door_opened':False,
                 'payment':'MOCK_ONLY' if cfg.demo else cfg.payment_provider.upper(),
                 'door':'SIMULATED_ONLY','unattended_approved':False}
 
@@ -384,7 +386,7 @@ def create_app(settings:Settings|None=None)->FastAPI:
 
     @app.post('/api/entry')
     def entry():
-        if not cfg.demo:abort(503,'正式访客核验未接入，当前禁止无人入店授权')
+        if not cfg.demo:abort(503,'请向店员领取结账邀请码后再结账。这不是身份核验，也不会开门。')
         token=random_token();sid=uuid4().hex;ts=now()
         with db.tx() as c:
             c.execute('INSERT INTO guest_sessions(id,token_hash,created_at,expires_at) VALUES(?,?,?,?)',
@@ -408,7 +410,7 @@ def create_app(settings:Settings|None=None)->FastAPI:
             invite=random_token();ts=now()
             c.execute('INSERT INTO checkout_invites(invite_hash,created_at,expires_at) VALUES(?,?,?)',
                       (digest(invite),ts,ts+120))
-            db.audit(c,actor,'STAFF_CHECKOUT_INVITE','expires_120s')
+            db.audit(c,actor,'INVITE_CREATED','lifetime_seconds=120')
         base=cfg.public_base_url.rstrip('/') if not cfg.demo else 'http://127.0.0.1:8000'
         url=base+'/?invite='+invite
         return {'invite':invite,'checkout_url':url,'qr_data_uri':qr_image_data(url),
@@ -423,9 +425,14 @@ def create_app(settings:Settings|None=None)->FastAPI:
         with db.tx() as c:
             mode=c.execute("SELECT value FROM store_settings WHERE key='mode'").fetchone()['value']
             if mode!='STAFFED':abort(409,'仅有人经营模式允许领取结账会话')
+            token_hash=digest(payload.invite)
             cur=c.execute('UPDATE checkout_invites SET consumed_at=? WHERE invite_hash=? AND consumed_at IS NULL AND expires_at>?',
-                          (ts,digest(payload.invite),ts))
-            if cur.rowcount!=1:abort(401,'邀请码无效、过期或已使用')
+                          (ts,token_hash,ts))
+            if cur.rowcount!=1:
+                row=c.execute('SELECT consumed_at,expires_at FROM checkout_invites WHERE invite_hash=?',(token_hash,)).fetchone()
+                if not row:abort(401,'邀请码无效')
+                if row['consumed_at'] is not None:abort(401,'邀请码已使用')
+                abort(401,'邀请码已过期')
             c.execute('INSERT INTO guest_sessions(id,token_hash,created_at,expires_at,verified_identity_hash) VALUES(?,?,?,?,?)',
                       (sid,digest(token),ts,ts+3600,None))
             record_virtual_door(c,sid,'CHECKOUT_SESSION','NOT A DOOR GRANT')
