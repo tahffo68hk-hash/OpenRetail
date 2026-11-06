@@ -4,6 +4,20 @@
 
 完全无人值守经营仍是 **NOT_APPROVED**。示例配置里的真实支付和实体开锁都是关闭的。
 
+## 本增量（路线图与当前分支对齐）
+
+只改了 `docs/TECH_ROADMAP.md` 里三处过时说法，运行行为没有变：
+
+- 桥接脚本已经可以在不设置 `ADMIN_KEY`、`INTEGRATION_KEY`、`APP_SECRET` 时跑通。文档不再写「干净工作区会因缺少密钥而失败，应先修启动方式」。
+- 管理页已有「模拟退款」。第一次成功是「模拟退款已回补库存，不是微信退款」；已经退过后再请求是「模拟退款已经完成，这次没有增加库存」。文档不再写「模拟退款只有 API、页面上没有按钮」。
+- Frigate worker 对 `label=person` 的 `new`、`update`、`end` 会转发，页面显示「有人」。文档不再写「目前不转发 update」。真实 broker 仍然不是必需，付费检测模型仍然不要开。
+
+真机验收仍缺顾客手机、微信内打开、HTTPS 和回调延迟。本地页面会忽略一部分进行中的第二次点击，这不是手机验收。完全无人值守仍是 NOT_APPROVED。真实微信和支付宝仍关闭。`unlock()` 仍不得调用 `lock.unlock` 或 `lock.open`。库存权威仍是本仓库 SQLite。
+
+`/tmp/openretail-venv/bin/python -m pytest -q`（工作目录 `/workspace`，Python 3.12.3）：**89 passed，1 warning，9.67s，退出码 0**。警告仍是 Starlette 的 `httpx` TestClient 弃用提示。与上一轮 89 相同，没有为文档另加测试。
+
+`scripts/ui_bridge_smoke.py` 在去掉密钥环境变量后退出码 0。顾客没有领取邀请码。¥2.00 模拟支付仍显示「模拟支付成功 · 非真实资金 · 已扣库存 · ¥2.00」。390 宽 `scrollWidth` 390，1440 宽 `scrollWidth` 1440，`pageerror` 为空。这仍是 Chrome 到 TestClient 的桥，不是真机，也不是真实收款。这条 PR 仍未合并。
+
 ## 本增量（管理端空名称）
 
 已在代码和测试里做到，并在本机复跑：
