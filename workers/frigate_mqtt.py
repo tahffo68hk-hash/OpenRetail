@@ -7,6 +7,21 @@ import httpx
 from dotenv import load_dotenv
 load_dotenv()
 
+FORWARDED_TYPES=('new','update','end')
+
+def person_payload(payload):
+    """Person new/update/end metadata only. None means do not forward. No broker is involved."""
+    if not isinstance(payload,dict):return None
+    if payload.get('type') not in FORWARDED_TYPES:return None
+    event=payload.get('after') or payload.get('before') or {}
+    if not isinstance(event,dict) or event.get('label')!='person':return None
+    return payload
+
+def forward_event(payload,post):
+    body=person_payload(payload)
+    if body is None:return {'forwarded':False}
+    return {'forwarded':True,'response':post(body)}
+
 def main():
     import paho.mqtt.client as mqtt
     endpoint=os.getenv('INTERNAL_API_URL','http://127.0.0.1:8000').rstrip('/')+'/api/integrations/frigate-event'
@@ -18,12 +33,11 @@ def main():
         try:
             if len(msg.payload)>128000:return
             payload=json.loads(msg.payload)
-            if payload.get('type') not in ('new','end'):return
-            event=payload.get('after') or payload.get('before') or {}
-            if event.get('label')!='person':return
-            r=httpx.post(endpoint,headers={'X-Integration-Key':key},json=payload,timeout=4)
-            r.raise_for_status()
-            print('Frigate event:',r.json())
+            outcome=forward_event(payload,lambda body:httpx.post(
+                endpoint,headers={'X-Integration-Key':key},json=body,timeout=4))
+            if not outcome['forwarded']:return
+            outcome['response'].raise_for_status()
+            print('Frigate event:',outcome['response'].json())
         except (ValueError,httpx.HTTPError) as exc:
             print('Event forwarding failed:',type(exc).__name__)
     c=mqtt.Client(mqtt.CallbackAPIVersion.VERSION2,client_id='openretail-frigate-bridge')

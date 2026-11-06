@@ -94,6 +94,7 @@ with TestClient(create_app(cfg)) as backend,sync_playwright() as pw:
  p.locator('#jump-help').click()
  p.wait_for_function("document.querySelector('#help-status').value==='attention' && document.querySelector('#help-list').textContent.includes('请到货架帮忙') && document.querySelector('#help-list').textContent.includes('待处理') && !document.querySelector('#help-list').textContent.includes('已确认')")
  p.wait_for_function("document.querySelector('#door-event-list').textContent.includes('SESSION_ISSUED')")
+ p.wait_for_function("(()=>{const t=document.querySelector('#event-list').textContent;return !t.includes('盗窃')&&!t.includes('偷盗')&&!t.includes('未付款离店')})()")
  p.wait_for_function("document.querySelector('#door-lock-note').textContent.includes('physical_door_opened=false')")
  p.wait_for_function("document.querySelector('#door-contact').textContent.includes('门磁未配置') && document.querySelector('#door-contact').textContent.includes('physical_door_opened=false') && !document.querySelector('#door-contact').textContent.includes('已开锁')")
  p.locator('#issue-invite').click()

@@ -70,7 +70,7 @@
 
 ### Frigate 与 MQTT
 
-- 用途：本地 NVR 的人形/活动事件。`workers/frigate_mqtt.py` 订阅 `frigate/events`，把 `type` 为 `new` 或 `end` 且 `label=person` 的消息转到 `POST /api/integrations/frigate-event`。接口本身也接受 `update`，但 worker 会丢掉 `update`。返回值包含 `theft_detected=false`。
+- 用途：本地 NVR 的人形/活动事件。`workers/frigate_mqtt.py` 订阅 `frigate/events`，把 `type` 为 `new`、`update` 或 `end` 且 `label=person` 的消息转到 `POST /api/integrations/frigate-event`。其他 label 不转发。返回值包含 `theft_detected=false`。管理页把已存的 person 事件显示为「有人」。
 - 官方文档（本次打开）：
   - 项目：<https://github.com/blakeblackshear/frigate>（本地 NVR，IP 摄像头实时目标检测）
   - MQTT：<https://docs.frigate.video/integrations/mqtt/>（`frigate/events` 的 `new` / `update` / `end`；示例 `label` 可为 `person`）

@@ -4,6 +4,18 @@
 
 完全无人值守经营仍是 **NOT_APPROVED**。示例配置里的真实支付和实体开锁都是关闭的。
 
+## 本增量（有人事件与 update 转发）
+
+已在代码和测试里做到，并在本机复跑：
+
+- 已存的 Frigate `person` 事件在「设备与异常记录」里显示为「有人」，并带上摄像头和事件类型，例如 `有人 · aisle · update`。不写成盗窃、偷盗或未付款离店。`theft_detected` 仍是 false。原来的说明「Frigate 检测人员事件 ≠ 偷盗判断」还在，表示这不是损失结论。
+- MQTT 桥对 `label=person` 的 `new`、`update`、`end` 同样转发。其他 label 仍忽略。测试只调用转发判断和 HTTP 入库，没有启动 MQTT broker 或 Frigate。
+- 入库和显示不改账面或预留，不写改变库存的流水，不让预留到期，不关单，不开门，不调用支付机构。`physical_door_opened` 仍是 false。没有打开付费检测模型，也没有调用锁服务。
+
+`/tmp/openretail-venv/bin/python -m pytest -q`（工作目录 `/workspace`，Python 3.12.3）：**80 passed，1 warning，8.37s，退出码 0**。警告仍是 Starlette 的 `httpx` TestClient 弃用提示。80 = 上一轮 79 + 本增量 1。
+
+`scripts/ui_bridge_smoke.py` 在去掉密钥环境变量后退出码 0。顾客没有领取邀请码，仍用「生成访客会话」完成 ¥2.00 模拟支付，并含「模拟支付成功 · 非真实资金 · 已扣库存」。没有启动 MQTT 或 Frigate。设备与异常记录列表不含盗窃、偷盗或未付款离店。390 宽 `scrollWidth` 390，1440 宽 `scrollWidth` 1440，`pageerror` 为空。这仍是 Chrome 到 TestClient 的桥，不是真机，也不是真实收款。这条 PR 仍未合并。
+
 ## 本增量（空条码只提示输入）
 
 已在代码和测试里做到，并在本机复跑：
