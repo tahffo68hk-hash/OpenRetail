@@ -250,6 +250,8 @@ def create_app(settings:Settings|None=None)->FastAPI:
     app.state.refund_inflight=set()
     app.state.close_guard=threading.Lock()
     app.state.close_inflight=set()
+    app.state.adjust_guard=threading.Lock()
+    app.state.adjust_inflight=set()
 
     @app.middleware('http')
     async def security_headers(request:Request,call_next):
@@ -1257,19 +1259,34 @@ def create_app(settings:Settings|None=None)->FastAPI:
     @app.post('/api/admin/products/{product_id}/adjust-stock')
     def adjust_stock(product_id:int,payload:StockChange, actor:str=Depends(admin)):
         delta=require_quantity_delta(payload.quantity_delta)
-        with db.tx() as c:
-            p=c.execute('SELECT * FROM products WHERE id=?',(product_id,)).fetchone()
-            if not p:abort(404,'商品不存在')
-            new=p['stock']+delta
-            # On-hand floor is the quantity already reserved for unpaid orders, and never below zero.
-            if new<0 or new<p['reserved_stock']:
-                abort(409,'库存调整会低于可售底线或侵占未结算预留')
-            c.execute('UPDATE products SET stock=? WHERE id=?',(new,product_id))
-            db.movement(c,product_id,delta,0,payload.reason,'MANUAL')
-            db.audit(c,actor,'STOCK_ADJUST',f'{p["barcode"]}:{delta}')
-        return {'product_id':product_id,'stock':new,'reserved_stock':p['reserved_stock'],
-                'reason':payload.reason,'system_of_record':'sqlite','physical_door_opened':False,
-                'identity_verified':False,'door_authorized':False}
+        with app.state.adjust_guard:
+            if product_id in app.state.adjust_inflight:
+                with db.connect() as c:
+                    current=c.execute('SELECT stock,reserved_stock FROM products WHERE id=?',(product_id,)).fetchone()
+                if not current:abort(404,'商品不存在')
+                return {'product_id':product_id,'stock':current['stock'],'reserved_stock':current['reserved_stock'],
+                        'reason':payload.reason,'system_of_record':'sqlite','physical_door_opened':False,
+                        'identity_verified':False,'door_authorized':False,'duplicate':True,'applied':False}
+            app.state.adjust_inflight.add(product_id)
+        try:
+            hold=getattr(app.state,'hold_adjust',None)
+            if hold:hold()
+            with db.tx() as c:
+                p=c.execute('SELECT * FROM products WHERE id=?',(product_id,)).fetchone()
+                if not p:abort(404,'商品不存在')
+                new=p['stock']+delta
+                # On-hand floor is the quantity already reserved for unpaid orders, and never below zero.
+                if new<0 or new<p['reserved_stock']:
+                    abort(409,'库存调整会低于可售底线或侵占未结算预留')
+                c.execute('UPDATE products SET stock=? WHERE id=?',(new,product_id))
+                db.movement(c,product_id,delta,0,payload.reason,'MANUAL')
+                db.audit(c,actor,'STOCK_ADJUST',f'{p["barcode"]}:{delta}')
+            return {'product_id':product_id,'stock':new,'reserved_stock':p['reserved_stock'],
+                    'reason':payload.reason,'system_of_record':'sqlite','physical_door_opened':False,
+                    'identity_verified':False,'door_authorized':False,'duplicate':False,'applied':True}
+        finally:
+            with app.state.adjust_guard:
+                app.state.adjust_inflight.discard(product_id)
 
     @app.post('/api/admin/import-products',dependencies=[Depends(admin)])
     async def import_products(file:UploadFile=File(...),dry_run:bool=Query(True)):

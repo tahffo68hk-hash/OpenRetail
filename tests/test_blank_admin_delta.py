@@ -57,7 +57,7 @@ def test_invalid_adjust_quantity_does_not_move_stock(client, admin_header):
     assert client.get('/api/admin/inventory-ledger',headers=admin_header).json()['balanced'] is True
     script=__import__('pathlib').Path('web/app.js').read_text(encoding='utf-8')
     adjust=script.split("$('adjust-form').onsubmit")[1].split('async function uploadCsv')[0]
-    assert adjust.index('adminProduct')<adjust.index('adminStockDelta')
+    assert adjust.index('blankAdminBarcode')<adjust.index('adminStockDelta')
     assert "textContent='调整数量不能为 0'" in script
     assert "textContent='请输入商品条码'" in script
     assert client.post('/api/orders/'+'x'*32+'/refund',headers=guest).status_code==404

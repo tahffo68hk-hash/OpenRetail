@@ -211,8 +211,11 @@ with TestClient(create_app(cfg)) as backend,sync_playwright() as pw:
  p.locator('#adjust-form input[name="barcode"]').fill('6900000099991')
  p.locator('#adjust-form input[name="delta"]').fill('2')
  p.locator('#adjust-form select[name="reason"]').select_option('到货入库')
- p.locator('#adjust-form button[type="submit"]').click()
+ p.evaluate("() => { const b=document.querySelector('#adjust-form button[type=\"submit\"]'); b.click(); b.click(); }")
  p.wait_for_function("document.querySelector('#product-status').textContent.includes('库存已调整为 6')")
+ with backend.app.state.db.connect() as conn:
+  assert conn.execute("SELECT stock FROM products WHERE barcode='6900000099991'").fetchone()['stock']==6
+  assert conn.execute("SELECT COUNT(*) n FROM audit_events WHERE action='STOCK_ADJUST' AND detail LIKE '6900000099991:%'").fetchone()['n']==1
  p.locator('[data-listing-barcode="6900000099991"]').click()
  p.wait_for_function("document.querySelector('#product-status').textContent.includes('已下架') && document.querySelector('#product-status').textContent.includes('库存仍为 6')")
  p.wait_for_function("document.querySelector('#audit-list').textContent.includes('PRODUCT_UNLISTED') && document.querySelector('#audit-list').textContent.includes('6900000099991')")
