@@ -143,6 +143,9 @@ class Line(BaseModel):
 class NewOrder(BaseModel):
     request_id:str=Field(min_length=8,max_length=128)
     lines:list[Line]=Field(min_length=1,max_length=40)
+class LineQuantity(BaseModel):
+    product_id:int=Field(gt=0)
+    quantity:int=Field(ge=0,le=30)
 
 class ProductInput(BaseModel):
     barcode:str=Field(min_length=1,max_length=64)
@@ -529,6 +532,61 @@ def create_app(settings:Settings|None=None)->FastAPI:
             c.execute("UPDATE orders SET status='CANCELLED' WHERE id=?",(order_id,))
             db.audit(c,'visitor','ORDER_CANCELLED',order_id)
             return row_order(c,order_id)
+
+    @app.post('/api/orders/{order_id}/lines')
+    def set_line_quantity(order_id:str, payload:LineQuantity, sid:str=Depends(guest)):
+        """Change one unpaid line. Reservations move with the quantity; on-hand stock does not."""
+        with db.tx() as c:
+            db.expire(c,now())
+            order=order_owned(c,order_id,sid)
+            if order['status']!='PENDING':
+                abort(409,'只有未付款订单可以改数量')
+            line=c.execute('''SELECT product_id,quantity,unit_price_cents FROM order_lines
+                              WHERE order_id=? AND product_id=?''',(order_id,payload.product_id)).fetchone()
+            if not line:abort(404,'订单里没有这个商品')
+            current=int(line['quantity'])
+            target=payload.quantity
+            if target!=current:
+                product=c.execute('SELECT id,stock,reserved_stock,active FROM products WHERE id=?',(payload.product_id,)).fetchone()
+                if not product:abort(404,'商品不存在')
+                delta=target-current
+                if delta>0:
+                    if not product['active']:abort(409,'该商品已下架，不能增加数量')
+                    if product['stock']-product['reserved_stock']<delta:abort(409,'可售库存不足')
+                    cur=c.execute('''UPDATE products SET reserved_stock=reserved_stock+?
+                                     WHERE id=? AND stock-reserved_stock>=?''',(delta,product['id'],delta))
+                    if cur.rowcount!=1:abort(409,'可售库存不足')
+                    db.movement(c,product['id'],0,delta,'ORDER_RESERVED',order_id)
+                    c.execute('UPDATE order_lines SET quantity=? WHERE order_id=? AND product_id=?',
+                              (target,order_id,product['id']))
+                else:
+                    release=-delta
+                    cur=c.execute('''UPDATE products SET reserved_stock=reserved_stock-?
+                                     WHERE id=? AND reserved_stock>=?''',(release,product['id'],release))
+                    if cur.rowcount!=1:raise RuntimeError('reservation invariant broken')
+                    db.movement(c,product['id'],0,-release,'ORDER_RELEASED',order_id)
+                    if target==0:
+                        c.execute('DELETE FROM order_lines WHERE order_id=? AND product_id=?',(order_id,product['id']))
+                    else:
+                        c.execute('UPDATE order_lines SET quantity=? WHERE order_id=? AND product_id=?',
+                                  (target,order_id,product['id']))
+                remaining=c.execute('SELECT product_id,quantity FROM order_lines WHERE order_id=?',(order_id,)).fetchall()
+                if not remaining:
+                    c.execute("UPDATE orders SET status='CANCELLED', total_cents=0, fingerprint='' WHERE id=?",(order_id,))
+                    db.audit(c,'visitor','ORDER_EMPTIED',order_id)
+                else:
+                    total=c.execute('SELECT COALESCE(SUM(unit_price_cents*quantity),0) n FROM order_lines WHERE order_id=?',
+                                    (order_id,)).fetchone()['n']
+                    pairs=sorted((int(r['product_id']),int(r['quantity'])) for r in remaining)
+                    fp=hashlib.sha256(json.dumps(pairs,separators=(',',':')).encode()).hexdigest()
+                    c.execute('UPDATE orders SET total_cents=?, fingerprint=? WHERE id=?',(total,fp,order_id))
+                    db.audit(c,'visitor','ORDER_QTY',f'{payload.product_id}:{target}')
+            body=row_order(c,order_id)
+            body['cart_empty']=body['status']=='CANCELLED' and not body['lines']
+            body['physical_door_opened']=False
+            body['real_door_enabled']=False
+            body['payment_required_to_leave']=False
+            return body
 
     def mock_enabled():
         if not(cfg.demo and cfg.mock_payments):abort(403,'模拟支付仅允许演示模式，不会访问微信支付')
