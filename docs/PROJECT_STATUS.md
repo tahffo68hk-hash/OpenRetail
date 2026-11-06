@@ -4,6 +4,19 @@
 
 完全无人值守经营仍是 **NOT_APPROVED**。示例配置里的真实支付和实体开锁都是关闭的。
 
+## 本增量（今日订单列表和 CSV）
+
+已在代码和测试里做到，并在本机复跑：
+
+- 管理页原有的「最近订单」改为同一张「今日订单」表，按 `store_settings.store_timezone`（默认 `Asia/Shanghai`）的自然日。比较方式和今日摘要一样：带时区的本地零点换成 UTC 纪元秒。上海时间当天 01:00 的订单在列表里，前一个当地日历日的订单不在。
+- 每行有订单编号、当地时间、金额、订单状态、商品摘要，以及资金标签。模拟付款显示「模拟销售额（非真实资金）」，接口里的 `money_label` 是 `MOCK_NOT_REAL_MONEY`，`verified` 为 0。已验签金额在演示流程里仍是 0。
+- `GET /api/admin/orders.csv` 导出同一批今日订单。列是 `order_id,local_time,timezone,status,amount_yuan,payment_label,real_money,items`。模拟行的 `payment_label` 为 `MOCK_NOT_REAL_MONEY`，`real_money` 为 `false`。文件里没有管理员密钥或支付凭证。成功导出追加 `ORDERS_EXPORTED`，只记条数和时区。
+- 未登录查看或导出返回 401。查看和导出不改库存、不开门、不调用支付机构。
+
+`/tmp/openretail-venv/bin/python -m pytest -q`（工作目录 `/workspace`，Python 3.12.3）：**58 passed，1 warning，6.02s，退出码 0**。警告仍是 Starlette 的 `httpx` TestClient 弃用提示。58 = 上一轮 57 + 本增量 1。
+
+`scripts/ui_bridge_smoke.py` 在去掉密钥环境变量后退出码 0。模拟支付 ¥2.00 之后，今日订单表含「非真实资金」和「¥2.00」，导出状态含「已导出今日订单」和「非真实资金」。390 宽 `scrollWidth` 390，1440 宽 `scrollWidth` 1440，`pageerror` 为空。脚本没有做浏览器内的时间穿越；01:00 边界由 pytest 固定时间戳覆盖。这仍是 Chrome 到 TestClient 的桥，不是真机，也不是真实收款。
+
 ## 本增量（管理操作审计）
 
 已在代码和测试里做到，并在本机复跑：

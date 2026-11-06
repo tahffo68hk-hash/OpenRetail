@@ -34,7 +34,7 @@ with TestClient(create_app(cfg)) as backend,sync_playwright() as pw:
   const mem=new Map();Object.defineProperty(window,'sessionStorage',{configurable:true,value:{getItem:k=>mem.get(k)||null,setItem:(k,v)=>mem.set(k,v),removeItem:k=>mem.delete(k)}});
   window.fetch=async (path,opts={})=>{const x=await window.__callBackend(path,opts.method||'GET',opts.headers||{},opts.body||null);
     const bytes=x.binary?Uint8Array.from(atob(x.binary),c=>c.charCodeAt(0)):null;
-    return {ok:x.status>=200&&x.status<300,status:x.status,json:async()=>x.data,blob:async()=>new Blob(bytes?[bytes]:[])}}
+    return {ok:x.status>=200&&x.status<300,status:x.status,json:async()=>x.data,text:async()=>typeof x.data==='string'?x.data:'',blob:async()=>new Blob(bytes?[bytes]:[])}}
  }''')
  p.add_script_tag(content=(root/'web/app.js').read_text())
  p.wait_for_function("document.querySelectorAll('.product-card').length===8",timeout=10000)
@@ -69,6 +69,9 @@ with TestClient(create_app(cfg)) as backend,sync_playwright() as pw:
  p.wait_for_function("document.querySelector('#ledger-balance').textContent.includes('一致')")
  p.wait_for_function("document.querySelector('#m-sales').textContent.includes('¥')")
  assert p.locator('#m-real').inner_text()=='¥0.00'
+ p.wait_for_function("document.querySelector('#order-table').textContent.includes('非真实资金') && document.querySelector('#order-table').textContent.includes('¥2.00')")
+ p.locator('#orders-export').click()
+ p.wait_for_function("document.querySelector('#order-export-status').textContent.includes('已导出今日订单') && document.querySelector('#order-export-status').textContent.includes('非真实资金')")
  p.wait_for_function("document.querySelector('#today-summary').textContent.includes('模拟销售额（非真实资金）') && document.querySelector('#today-summary').textContent.includes('已验签金额（真实资金） ¥0.00') && document.querySelector('#today-summary').textContent.includes('¥2.00') && document.querySelector('#today-summary').textContent.includes('Asia/Shanghai')")
  p.wait_for_function("document.querySelector('#store-timezone').value==='Asia/Shanghai'")
  p.wait_for_function("document.querySelector('#help-attention').textContent.includes('待处理求助')")
