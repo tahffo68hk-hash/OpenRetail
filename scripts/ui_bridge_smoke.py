@@ -40,8 +40,12 @@ with TestClient(create_app(cfg)) as backend,sync_playwright() as pw:
  p.add_script_tag(content=(root/'web/app.js').read_text())
  p.wait_for_function("document.querySelectorAll('.product-card').length===8",timeout=10000)
  print('products:',p.locator('.product-card').count(),'width:',p.evaluate('document.documentElement.scrollWidth'))
- p.locator('#entry-btn').click()
- p.wait_for_function("document.querySelector('#entry-result').textContent.includes('成功')")
+ p.evaluate("() => { const b=document.querySelector('#entry-btn'); b.click(); b.click(); }")
+ p.wait_for_function("document.querySelector('#entry-result').textContent.includes('访客会话创建成功（未进行身份核验）')")
+ with backend.app.state.db.connect() as conn:
+  assert conn.execute('SELECT COUNT(*) n FROM guest_sessions').fetchone()['n']==1
+  assert conn.execute("SELECT COUNT(*) n FROM audit_events WHERE action='DEMO_SESSION_CREATE'").fetchone()['n']==1
+  assert conn.execute("SELECT COUNT(*) n FROM door_events WHERE result='SESSION_ISSUED'").fetchone()['n']==1
  p.locator('#barcode').fill('   ')
  p.locator('#scan-form button[type="submit"]').click()
  p.wait_for_function("document.querySelector('#scan-hint').textContent.includes('请输入商品条码') && document.querySelector('#barcode').value==='' && document.activeElement===document.querySelector('#barcode')")

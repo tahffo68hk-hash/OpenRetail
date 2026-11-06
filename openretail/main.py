@@ -208,6 +208,8 @@ def create_app(settings:Settings|None=None)->FastAPI:
     app.state.invite_inflight=False
     app.state.redeem_guard=threading.Lock()
     app.state.redeem_inflight=set()
+    app.state.entry_guard=threading.Lock()
+    app.state.entry_inflight=False
 
     @app.middleware('http')
     async def security_headers(request:Request,call_next):
@@ -405,14 +407,27 @@ def create_app(settings:Settings|None=None)->FastAPI:
     @app.post('/api/entry')
     def entry():
         if not cfg.demo:abort(503,'请向店员领取结账邀请码后再结账。这不是身份核验，也不会开门。')
-        token=random_token();sid=uuid4().hex;ts=now()
-        with db.tx() as c:
-            c.execute('INSERT INTO guest_sessions(id,token_hash,created_at,expires_at) VALUES(?,?,?,?)',
-                      (sid,digest(token),ts,ts+7200))
-            record_virtual_door(c,sid,'SESSION_ISSUED','NO PHYSICAL UNLOCK')
-            db.audit(c,'visitor','DEMO_SESSION_CREATE',sid[:12])
-        return {'guest_token':token,'session_id':sid,'expires_at':ts+7200,'identity_verified':False,
-                'door_authorized':False,'physical_door_opened':False,'virtual_event':'SESSION_ISSUED'}
+        with app.state.entry_guard:
+            if app.state.entry_inflight:
+                return {'duplicate':True,'guest_token':None,'session_id':None,'expires_at':None,
+                        'identity_verified':False,'door_authorized':False,'physical_door_opened':False,
+                        'virtual_event':None}
+            app.state.entry_inflight=True
+        try:
+            hold=getattr(app.state,'hold_entry',None)
+            if hold:hold()
+            token=random_token();sid=uuid4().hex;ts=now()
+            with db.tx() as c:
+                c.execute('INSERT INTO guest_sessions(id,token_hash,created_at,expires_at) VALUES(?,?,?,?)',
+                          (sid,digest(token),ts,ts+7200))
+                record_virtual_door(c,sid,'SESSION_ISSUED','NO PHYSICAL UNLOCK')
+                db.audit(c,'visitor','DEMO_SESSION_CREATE',sid[:12])
+            return {'guest_token':token,'session_id':sid,'expires_at':ts+7200,'duplicate':False,
+                    'identity_verified':False,'door_authorized':False,'physical_door_opened':False,
+                    'virtual_event':'SESSION_ISSUED'}
+        finally:
+            with app.state.entry_guard:
+                app.state.entry_inflight=False
 
     def qr_image_data(value:str)->str:
         img=qrcode.make(value,box_size=7,border=3)

@@ -4,6 +4,17 @@
 
 完全无人值守经营仍是 **NOT_APPROVED**。示例配置里的真实支付和实体开锁都是关闭的。
 
+## 本增量（访客会话进行中忽略第二次点击）
+
+已在代码和测试里做到，并在本机复跑：
+
+- 「生成访客会话」在第一次请求还没结束时，再点一次不会再发 `/api/entry`，也不会改掉第一次的成功文字。成功后页面保持「访客会话创建成功（未进行身份核验）」和那一次的有效期。identity_verified、door_authorized、physical_door_opened 仍是 false。这一轮连点只开一个会话，`SESSION_ISSUED` 和 `DEMO_SESSION_CREATE` 各一条。
+- 请求结束后再点一次，仍可以按原来的演示行为再开一个会话。非演示的 `/api/entry` 仍拒绝，并返回「请向店员领取结账邀请码后再结账。这不是身份核验，也不会开门。」邀请码的创建、领取和复制没有改。演示结账仍不需要邀请码，也不写 `INVITE_REDEEMED`。这条路径不改账面或预留，不写库存流水，不开门，不调用支付机构。
+
+`/tmp/openretail-venv/bin/python -m pytest -q`（工作目录 `/workspace`，Python 3.12.3）：**86 passed，1 warning，9.43s，退出码 0**。警告仍是 Starlette 的 `httpx` TestClient 弃用提示。86 = 上一轮 85 + 本增量 1。
+
+`scripts/ui_bridge_smoke.py` 在去掉密钥环境变量后退出码 0。顾客没有领取邀请码。对「生成访客会话」连点两次后只留下一个会话和一次成功文字，并仍完成 ¥2.00 模拟支付，含「模拟支付成功 · 非真实资金 · 已扣库存」。390 宽 `scrollWidth` 390，1440 宽 `scrollWidth` 1440，`pageerror` 为空。这仍是 Chrome 到 TestClient 的桥，不是真机，也不是真实收款。这条 PR 仍未合并。
+
 ## 本增量（复制未使用的邀请码）
 
 已在代码和测试里做到，并在本机复跑：
