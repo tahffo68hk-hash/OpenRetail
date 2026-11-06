@@ -7,6 +7,7 @@ allowed only with separately configured WeChat Native merchant credentials.
 import hashlib
 import sys
 import base64
+from datetime import datetime, timezone
 import io
 import qrcode
 import hmac
@@ -728,11 +729,35 @@ def create_app(settings:Settings|None=None)->FastAPI:
             review=c.execute("SELECT COUNT(*) n FROM orders WHERE status='PAYMENT_REVIEW'").fetchone()['n']
             entry=c.execute('SELECT COUNT(*) n FROM door_events').fetchone()['n']
             incidents=c.execute('SELECT COUNT(*) n FROM incidents').fetchone()['n']
+            day=datetime.now(timezone.utc).replace(hour=0,minute=0,second=0,microsecond=0)
+            day_start=int(day.timestamp())
+            today_orders=c.execute('SELECT COUNT(*) n FROM orders WHERE created_at>=?',(day_start,)).fetchone()['n']
+            today_paid=c.execute("SELECT COALESCE(SUM(total_cents),0) n FROM orders WHERE status='PAID' AND paid_at>=?",(day_start,)).fetchone()['n']
+            today_real=c.execute('''SELECT COALESCE(SUM(o.total_cents),0) n FROM orders o
+                JOIN payments p ON p.order_id=o.id
+                WHERE o.status='PAID' AND p.verified=1 AND o.paid_at>=?''',(day_start,)).fetchone()['n']
+            help_open=c.execute("SELECT COUNT(*) n FROM help_requests WHERE status='OPEN'").fetchone()['n']
+            help_ack=c.execute("SELECT COUNT(*) n FROM help_requests WHERE status='ACKNOWLEDGED'").fetchone()['n']
+            help_resolved=c.execute("SELECT COUNT(*) n FROM help_requests WHERE status='RESOLVED'").fetchone()['n']
+            threshold_row=c.execute("SELECT value FROM store_settings WHERE key='low_stock_threshold'").fetchone()
+            threshold=int(threshold_row['value']) if threshold_row else 5
+            low_stock=[{**asdict(row),'available_stock':row['stock']-row['reserved_stock']}
+                       for row in c.execute('''SELECT id,barcode,name,stock,reserved_stock FROM products
+                            WHERE active=1 AND stock<=? ORDER BY stock,id''',(threshold,))]
         return {'mode':mode,'products':count,'paid_orders':orders['n'],'simulated_revenue_cents':orders['revenue']-real,
                 'verified_revenue_cents':real,'payment_pending':pending,'payment_review':review,
                 'expired_last_check':expired,'door_events':entry,'incidents':incidents,
                 'home_assistant':ha.status(),'real_payments_enabled':cfg.payment_provider!='disabled',
-                'real_door_enabled':False}
+                'real_door_enabled':False,
+                'today_order_count':today_orders,
+                'today_simulated_revenue_cents':today_paid-today_real,
+                'today_verified_revenue_cents':today_real,
+                'today_basis':'UTC calendar day',
+                'help_needs_attention':help_open+help_ack,
+                'help_open':help_open,'help_acknowledged':help_ack,'help_resolved':help_resolved,
+                'low_stock_threshold':threshold,
+                'low_stock_basis':'products.stock on-hand book quantity; reserved_stock is still held for unpaid orders',
+                'low_stock':low_stock}
 
     @app.put('/api/admin/mode',dependencies=[Depends(admin)])
     def update_mode(payload:ModeInput):

@@ -4,6 +4,19 @@
 
 完全无人值守经营仍是 **NOT_APPROVED**。示例配置里的真实支付和实体开锁都是关闭的。
 
+## 本增量（今日摘要和低库存）
+
+已在代码和测试里做到，并在本机复跑：
+
+- `GET /api/admin/overview` 增加 UTC 自然日的今日订单数、今日模拟销售额、今日已验签金额。演示里的模拟付款只进模拟销售额，已验签金额保持 0。昨天的订单不计入今日。
+- 未结案求助 = `OPEN` + `ACKNOWLEDGED`。`RESOLVED` 单独计数，不算待处理。
+- 低库存读取 `store_settings.low_stock_threshold`，缺省为 5，比较的是账面 `products.stock`。列表同时给出 `reserved_stock` 和可售数。库存 5 会出现，库存 6 不会。这不是第二套库存。
+- 管理页登录后能看到「今日需要处理」。没有开锁按钮，也没有支付机构操作。
+
+`/tmp/openretail-venv/bin/python -m pytest -q`（工作目录 `/workspace`，Python 3.12.3）：**52 passed，1 warning，5.20s，退出码 0**。警告仍是 Starlette 的 `httpx` TestClient 弃用提示。52 = 上一轮 50 + 本增量 2。
+
+`scripts/ui_bridge_smoke.py` 在去掉密钥环境变量后退出码 0。今日摘要含「模拟销售额（非真实资金）」和「已验签金额（真实资金） ¥0.00」，并含模拟订单的 ¥2.00。新增账面库存 4 的商品后，低库存列表出现该条码和「预留」。390 宽 `scrollWidth` 390，1440 宽 `scrollWidth` 1440，`pageerror` 为空。这仍是 Chrome 到 TestClient 的桥，不是真机，也不是真实收款。
+
 ## 本增量（有订单后的单品维护）
 
 已在代码和测试里做到，并在本机复跑：

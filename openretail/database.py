@@ -171,6 +171,8 @@ class Database:
             c.executescript(SCHEMA)
         with self.tx() as c:
             c.execute("INSERT OR IGNORE INTO store_settings(key,value) VALUES('mode','STAFFED')")
+            # On-hand book quantity at or below this value is the store-wide low-stock list.
+            c.execute("INSERT OR IGNORE INTO store_settings(key,value) VALUES('low_stock_threshold','5')")
             if demo and not c.execute('SELECT 1 FROM products LIMIT 1').fetchone():
                 c.executemany('INSERT INTO products(barcode,name,price_cents,stock) VALUES(?,?,?,?)',SEED)
             # SQLite in this repository is the inventory system of record. Products

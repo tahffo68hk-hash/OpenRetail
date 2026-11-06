@@ -64,6 +64,8 @@ with TestClient(create_app(cfg)) as backend,sync_playwright() as pw:
  p.wait_for_function("document.querySelector('#ledger-balance').textContent.includes('一致')")
  p.wait_for_function("document.querySelector('#m-sales').textContent.includes('¥')")
  assert p.locator('#m-real').inner_text()=='¥0.00'
+ p.wait_for_function("document.querySelector('#today-summary').textContent.includes('模拟销售额（非真实资金）') && document.querySelector('#today-summary').textContent.includes('已验签金额（真实资金） ¥0.00') && document.querySelector('#today-summary').textContent.includes('¥2.00')")
+ p.wait_for_function("document.querySelector('#help-attention').textContent.includes('待处理求助')")
  p.locator('[data-mock-refund]').click()
  p.wait_for_function("document.querySelector('#order-table').textContent.includes('模拟退回')")
  p.locator('#product-form input[name="barcode"]').fill('6900000099991')
@@ -72,6 +74,7 @@ with TestClient(create_app(cfg)) as backend,sync_playwright() as pw:
  p.locator('#product-form input[name="stock"]').fill('4')
  p.locator('#product-form button[type="submit"]').click()
  p.wait_for_function("document.querySelector('#product-status').textContent.includes('已新增')")
+ p.wait_for_function("document.querySelector('#low-stock-list').textContent.includes('6900000099991') && document.querySelector('#low-stock-list').textContent.includes('预留')")
  p.locator('#edit-form input[name="barcode"]').fill('6900000099991')
  p.locator('#edit-form input[name="name"]').fill('烟雾测试商品改名')
  p.locator('#edit-form input[name="price"]').fill('4.20')
