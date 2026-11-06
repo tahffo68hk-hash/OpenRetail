@@ -4,6 +4,18 @@
 
 完全无人值守经营仍是 **NOT_APPROVED**。示例配置里的真实支付和实体开锁都是关闭的。
 
+## 本增量（只读门磁）
+
+已在代码和测试里做到，并在本机复跑：
+
+- 门禁事件区增加只读门磁。演示和冒烟默认没有启用 Home Assistant，也没有门磁实体，页面写「门磁未配置」，`physical_door_opened` 仍是 false。没有把没读到的门说成已经打开。
+- 启用 Home Assistant、有令牌、并且设置了 `HA_DOOR_STATE_ENTITY` 时，只发官方的 `GET /api/states/<entity_id>`。测试用 `httpx.MockTransport` 读到 `binary_sensor` 的 `on` 和 `device_class=door`。页面把它标成传感器读数，并写明不是开锁。
+- 这次读取不改账面或预留，不写库存流水，不确认求助，不关单，不调用支付机构。没有调用 `lock.unlock`、`lock.open`、`/api/services/lock/*` 或 `HA_UNLOCK_SCRIPT`。`unlock()` 在实体门开关关闭时仍返回 `SIMULATED`。`LIVE_DOOR_ENABLED=true` 的启动拒绝没有去掉。`integrations/esphome/door_contact_READ_ONLY.example.yaml` 仍是只读门磁示例，不是锁控制器。未登录读门禁事件仍是 401。
+
+`/tmp/openretail-venv/bin/python -m pytest -q`（工作目录 `/workspace`，Python 3.12.3）：**78 passed，1 warning，8.37s，退出码 0**。警告仍是 Starlette 的 `httpx` TestClient 弃用提示。78 = 上一轮 77 + 本增量 1。
+
+`scripts/ui_bridge_smoke.py` 在去掉密钥环境变量、且不启用 Home Assistant 或 `LIVE_DOOR_ENABLED` 后退出码 0。顾客没有领取邀请码，仍用「生成访客会话」完成 ¥2.00 模拟支付，并含「模拟支付成功 · 非真实资金 · 已扣库存」。管理页门禁事件显示「门磁未配置」和 `physical_door_opened=false`，没有已开锁。390 宽 `scrollWidth` 390，1440 宽 `scrollWidth` 1440，`pageerror` 为空。这仍是 Chrome 到 TestClient 的桥，不是真机，也不是真实收款或真实门锁。这条 PR 仍未合并。
+
 ## 本增量（从今日摘要查看求助）
 
 已在代码和测试里做到，并在本机复跑：

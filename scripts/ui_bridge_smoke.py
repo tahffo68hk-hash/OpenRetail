@@ -14,7 +14,8 @@ from openretail.main import create_app
 from dotenv import dotenv_values
 root=ROOT
 t=tempfile.TemporaryDirectory(prefix='openretail-ui-')
-cfg=Settings(db_path=str(Path(t.name)/'smoke.sqlite3'),admin_key='A'*40,integration_key='I'*40,app_secret='S'*40)
+cfg=Settings(db_path=str(Path(t.name)/'smoke.sqlite3'),admin_key='A'*40,integration_key='I'*40,app_secret='S'*40,
+             ha_enabled=False,live_door_enabled=False,ha_token='',ha_door_state_entity='')
 with TestClient(create_app(cfg)) as backend,sync_playwright() as pw:
  b=pw.chromium.launch(headless=True,executable_path=(shutil.which('chromium') or shutil.which('google-chrome') or pw.chromium.executable_path),args=['--no-sandbox'])
  p=b.new_page(viewport={'width':390,'height':844})
@@ -90,6 +91,7 @@ with TestClient(create_app(cfg)) as backend,sync_playwright() as pw:
  p.wait_for_function("document.querySelector('#help-status').value==='attention' && document.querySelector('#help-list').textContent.includes('请到货架帮忙') && document.querySelector('#help-list').textContent.includes('待处理') && !document.querySelector('#help-list').textContent.includes('已确认')")
  p.wait_for_function("document.querySelector('#door-event-list').textContent.includes('SESSION_ISSUED')")
  p.wait_for_function("document.querySelector('#door-lock-note').textContent.includes('physical_door_opened=false')")
+ p.wait_for_function("document.querySelector('#door-contact').textContent.includes('门磁未配置') && document.querySelector('#door-contact').textContent.includes('physical_door_opened=false') && !document.querySelector('#door-contact').textContent.includes('已开锁')")
  p.locator('#issue-invite').click()
  p.wait_for_function("document.querySelector('#invite-result').textContent.includes('120') && document.querySelector('#invite-result').textContent.includes('identity_verified=false') && document.querySelector('#invite-result').textContent.includes('door_authorized=false') && document.querySelector('#invite-result').textContent.includes('physical_door_opened=false')")
  p.locator('[data-help-status="ACKNOWLEDGED"]').click()

@@ -1312,8 +1312,10 @@ def create_app(settings:Settings|None=None)->FastAPI:
 
     @app.get('/api/admin/events',dependencies=[Depends(admin)])
     def admin_events():
+        contact=ha.door_contact()
         with db.connect() as c:
             return {'physical_door_opened':False,
+                    'door_contact':contact,
                     'door':[asdict(x) for x in c.execute('SELECT id,result,provider,detail,created_at FROM door_events ORDER BY id DESC LIMIT 40')],
                     'frigate':[asdict(x) for x in c.execute('SELECT * FROM incidents ORDER BY id DESC LIMIT 40')],
                     'audit':[asdict(x) for x in c.execute('SELECT actor,action,detail,created_at FROM audit_events ORDER BY id DESC LIMIT 40')]}
