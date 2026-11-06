@@ -204,8 +204,12 @@ with TestClient(create_app(cfg)) as backend,sync_playwright() as pw:
  p.locator('#edit-form input[name="barcode"]').fill('6900000099991')
  p.locator('#edit-form input[name="name"]').fill('烟雾测试商品改名')
  p.locator('#edit-form input[name="price"]').fill('4.20')
- p.locator('#edit-form button[type="submit"]').click()
+ p.evaluate("() => { const b=document.querySelector('#edit-form button[type=\"submit\"]'); b.click(); b.click(); }")
  p.wait_for_function("document.querySelector('#product-status').textContent.includes('库存仍为 4')")
+ with backend.app.state.db.connect() as conn:
+  edited=conn.execute("SELECT name,price_cents,stock,reserved_stock FROM products WHERE barcode='6900000099991'").fetchone()
+  assert edited['name']=='烟雾测试商品改名' and edited['price_cents']==420 and edited['stock']==4 and edited['reserved_stock']==0
+  assert conn.execute("SELECT COUNT(*) n FROM audit_events WHERE action='PRODUCT_EDIT' AND detail='6900000099991'").fetchone()['n']==1
  p.locator('#adjust-form input[name="barcode"]').fill('6900000099991')
  p.locator('#adjust-form input[name="delta"]').evaluate("el => { el.value='0'; }")
  p.locator('#adjust-form button[type="submit"]').click()

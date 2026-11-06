@@ -254,6 +254,8 @@ def create_app(settings:Settings|None=None)->FastAPI:
     app.state.adjust_inflight=set()
     app.state.create_guard=threading.Lock()
     app.state.create_inflight=set()
+    app.state.edit_guard=threading.Lock()
+    app.state.edit_inflight=set()
 
     @app.middleware('http')
     async def security_headers(request:Request,call_next):
@@ -1238,17 +1240,36 @@ def create_app(settings:Settings|None=None)->FastAPI:
         name=payload.name.strip()
         if not name:abort(422,'请输入商品名称')
         price_cents=require_price_cents(payload.price_cents)
-        with db.tx() as c:
-            current=c.execute('SELECT id,barcode,stock,reserved_stock FROM products WHERE id=?',(product_id,)).fetchone()
-            if not current:abort(404,'商品不存在')
-            c.execute('UPDATE products SET name=?,price_cents=? WHERE id=?',
-                      (name,price_cents,product_id))
-            db.audit(c,actor,'PRODUCT_EDIT',current['barcode'])
-            after=c.execute('SELECT stock,reserved_stock FROM products WHERE id=?',(product_id,)).fetchone()
-            if after['stock']!=current['stock'] or after['reserved_stock']!=current['reserved_stock']:
-                raise RuntimeError('name/price edit changed stock')
-        return {'id':product_id,'barcode':current['barcode'],'name':name,'price_cents':price_cents,
-                'stock':current['stock'],'reserved_stock':current['reserved_stock'],'stock_changed':False}
+        with app.state.edit_guard:
+            if product_id in app.state.edit_inflight:
+                with db.connect() as c:
+                    current=c.execute('SELECT barcode,name,price_cents,stock,reserved_stock FROM products WHERE id=?',(product_id,)).fetchone()
+                if not current:abort(404,'商品不存在')
+                return {'id':product_id,'barcode':current['barcode'],'name':current['name'],
+                        'price_cents':current['price_cents'],'stock':current['stock'],
+                        'reserved_stock':current['reserved_stock'],'stock_changed':False,'duplicate':True,
+                        'applied':False,'system_of_record':'sqlite','physical_door_opened':False,
+                        'identity_verified':False,'door_authorized':False}
+            app.state.edit_inflight.add(product_id)
+        try:
+            hold=getattr(app.state,'hold_edit',None)
+            if hold:hold()
+            with db.tx() as c:
+                current=c.execute('SELECT id,barcode,stock,reserved_stock FROM products WHERE id=?',(product_id,)).fetchone()
+                if not current:abort(404,'商品不存在')
+                c.execute('UPDATE products SET name=?,price_cents=? WHERE id=?',
+                          (name,price_cents,product_id))
+                db.audit(c,actor,'PRODUCT_EDIT',current['barcode'])
+                after=c.execute('SELECT stock,reserved_stock FROM products WHERE id=?',(product_id,)).fetchone()
+                if after['stock']!=current['stock'] or after['reserved_stock']!=current['reserved_stock']:
+                    raise RuntimeError('name/price edit changed stock')
+            return {'id':product_id,'barcode':current['barcode'],'name':name,'price_cents':price_cents,
+                    'stock':current['stock'],'reserved_stock':current['reserved_stock'],'stock_changed':False,
+                    'duplicate':False,'applied':True,'system_of_record':'sqlite','physical_door_opened':False,
+                    'identity_verified':False,'door_authorized':False}
+        finally:
+            with app.state.edit_guard:
+                app.state.edit_inflight.discard(product_id)
 
     @app.post('/api/admin/products/{product_id}/listing')
     def set_listing(product_id:int,payload:ListingInput, actor:str=Depends(admin)):
