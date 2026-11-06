@@ -69,6 +69,8 @@ class ProductInput(BaseModel):
 class ProductEdit(BaseModel):
     name:str=Field(min_length=1,max_length=120)
     price_cents:int=Field(ge=1,le=100_000_000)
+class ListingInput(BaseModel):
+    active:bool
 
 class ModeInput(BaseModel):mode:str
 class FakePayment(BaseModel):order_id:str
@@ -276,6 +278,15 @@ def create_app(settings:Settings|None=None)->FastAPI:
             db.expire(c,now())
             return [{**asdict(row),'available_stock':row['stock']-row['reserved_stock']}
                     for row in c.execute('SELECT * FROM products WHERE active=1 ORDER BY id')]
+
+    @app.get('/api/products/by-barcode/{barcode}')
+    def product_by_barcode(barcode:str):
+        with db.connect() as c:
+            row=c.execute('SELECT * FROM products WHERE barcode=?',(barcode,)).fetchone()
+        if not row:abort(404,'未找到条码')
+        if not row['active']:abort(409,'该商品已下架，暂不销售')
+        return {'id':row['id'],'barcode':row['barcode'],'name':row['name'],'price_cents':row['price_cents'],
+                'available_stock':row['stock']-row['reserved_stock'],'for_sale':True}
 
     @app.post('/api/entry')
     def entry():
@@ -843,6 +854,26 @@ def create_app(settings:Settings|None=None)->FastAPI:
                 raise RuntimeError('name/price edit changed stock')
         return {'id':product_id,'barcode':current['barcode'],'name':payload.name,'price_cents':payload.price_cents,
                 'stock':current['stock'],'reserved_stock':current['reserved_stock'],'stock_changed':False}
+
+    @app.post('/api/admin/products/{product_id}/listing',dependencies=[Depends(admin)])
+    def set_listing(product_id:int,payload:ListingInput):
+        """上架/下架 one SKU. Stock, reservations, and the ledger stay unchanged."""
+        with db.tx() as c:
+            current=c.execute('SELECT id,barcode,stock,reserved_stock,active FROM products WHERE id=?',(product_id,)).fetchone()
+            if not current:abort(404,'商品不存在')
+            before_moves=c.execute('SELECT COUNT(*) n FROM stock_movements WHERE product_id=?',(product_id,)).fetchone()['n']
+            desired=1 if payload.active else 0
+            outcome='IDEMPOTENT' if current['active']==desired else ('LISTED' if desired else 'UNLISTED')
+            if outcome!='IDEMPOTENT':
+                c.execute('UPDATE products SET active=? WHERE id=?',(desired,product_id))
+                db.audit(c,'operator','PRODUCT_'+outcome,current['barcode'])
+            after=c.execute('SELECT stock,reserved_stock,active FROM products WHERE id=?',(product_id,)).fetchone()
+            after_moves=c.execute('SELECT COUNT(*) n FROM stock_movements WHERE product_id=?',(product_id,)).fetchone()['n']
+            if after['stock']!=current['stock'] or after['reserved_stock']!=current['reserved_stock'] or after_moves!=before_moves:
+                raise RuntimeError('listing changed stock or the ledger')
+        return {'id':product_id,'barcode':current['barcode'],'active':bool(after['active']),'outcome':outcome,
+                'stock':after['stock'],'reserved_stock':after['reserved_stock'],'stock_changed':False,
+                'physical_door_opened':False,'real_door_enabled':False}
 
     @app.post('/api/admin/products/{product_id}/adjust-stock',dependencies=[Depends(admin)])
     def adjust_stock(product_id:int,payload:StockChange):
