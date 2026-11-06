@@ -547,15 +547,15 @@ def create_app(settings:Settings|None=None)->FastAPI:
             current=int(line['quantity'])
             target=payload.quantity
             if target!=current:
-                product=c.execute('SELECT id,stock,reserved_stock,active FROM products WHERE id=?',(payload.product_id,)).fetchone()
+                product=c.execute('SELECT id,name,stock,reserved_stock,active FROM products WHERE id=?',(payload.product_id,)).fetchone()
                 if not product:abort(404,'商品不存在')
                 delta=target-current
                 if delta>0:
                     if not product['active']:abort(409,'该商品已下架，不能增加数量')
-                    if product['stock']-product['reserved_stock']<delta:abort(409,'可售库存不足')
+                    if product['stock']-product['reserved_stock']<delta:abort(409,f'{product["name"]} 可售库存不足')
                     cur=c.execute('''UPDATE products SET reserved_stock=reserved_stock+?
                                      WHERE id=? AND stock-reserved_stock>=?''',(delta,product['id'],delta))
-                    if cur.rowcount!=1:abort(409,'可售库存不足')
+                    if cur.rowcount!=1:abort(409,f'{product["name"]} 可售库存不足')
                     db.movement(c,product['id'],0,delta,'ORDER_RESERVED',order_id)
                     c.execute('UPDATE order_lines SET quantity=? WHERE order_id=? AND product_id=?',
                               (target,order_id,product['id']))

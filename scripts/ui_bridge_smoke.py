@@ -41,6 +41,10 @@ with TestClient(create_app(cfg)) as backend,sync_playwright() as pw:
  print('products:',p.locator('.product-card').count(),'width:',p.evaluate('document.documentElement.scrollWidth'))
  p.locator('#entry-btn').click()
  p.wait_for_function("document.querySelector('#entry-result').textContent.includes('成功')")
+ p.locator('#barcode').fill('0000000000000')
+ p.locator('#scan-form button[type="submit"]').click()
+ p.wait_for_function("document.querySelector('#scan-hint').textContent.includes('未找到条码')")
+ assert p.locator('#cart-total').inner_text()=='¥0.00'
  p.locator('.add-btn').first.click()
  p.locator('#checkout-btn').click()
  p.wait_for_function("document.querySelector('#payment-result').textContent.includes('订单')")
